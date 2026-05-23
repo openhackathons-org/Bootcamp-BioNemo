@@ -14,7 +14,7 @@ Environment:
   LOCAL_NIM_CACHE          Host cache directory. Default: ~/.cache/nim
   LOCAL_NIM_WORKSPACE      Host workspace directory. Default: LOCAL_NIM_CACHE/workspace
   MOLMIM_IMAGE             Default: nvcr.io/nim/nvidia/molmim:1.0.0
-  BOLTZ2_IMAGE             Default: nvcr.io/nim/mit/boltz2:1.6.0, or
+  BOLTZ2_IMAGE             Default: nvcr.io/nim/mit/boltz2:1.7.0, or
                           nvcr.io/nim/mit/boltz2:1.4.0 on ARM hosts with
                           pre-590 NVIDIA drivers.
   DOCKER_BIN               Docker command. Default: docker. May be "sudo docker".
@@ -104,7 +104,7 @@ default_boltz2_image() {
             ;;
     esac
 
-    printf '%s\n' "nvcr.io/nim/mit/boltz2:1.6.0"
+    printf '%s\n' "nvcr.io/nim/mit/boltz2:1.7.0"
 }
 
 service="$1"

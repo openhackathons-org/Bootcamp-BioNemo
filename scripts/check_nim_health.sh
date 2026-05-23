@@ -6,6 +6,7 @@ set -euo pipefail
 service="${1:-boltz2}"
 endpoint="${2:-8000}"
 num_instances="${3:-1}"
+all_ready=1
 
 case "$service" in
     molmim)
@@ -50,10 +51,20 @@ molmim_generate_url() {
         */biology/nvidia/molmim)
             printf '%s/generate\n' "$value"
             ;;
+        */v1)
+            printf '%s/biology/nvidia/molmim/generate\n' "$value"
+            ;;
+        https://*.api.nvidia.com)
+            printf '%s/v1/biology/nvidia/molmim/generate\n' "$value"
+            ;;
         *)
             printf '%s/biology/nvidia/molmim/generate\n' "$value"
             ;;
     esac
+}
+
+is_hosted_api_url() {
+    printf '%s\n' "$1" | grep -q 'api\.nvidia\.com'
 }
 
 health_url() {
@@ -88,11 +99,12 @@ health_url() {
 }
 
 for i in $(seq 0 $((num_instances - 1))); do
-    if [ "$service" = "molmim" ] && printf '%s\n' "$endpoint" | grep -q 'api\.nvidia\.com'; then
+    if [ "$service" = "molmim" ] && is_hosted_api_url "$endpoint"; then
         url="$(molmim_generate_url "$endpoint")"
         printf "%s " "$url"
         if [ -z "${api_key:-}" ]; then
             printf "not ready (set MOLMIM_API_KEY, NVIDIA_API_KEY, or NGC_API_KEY)\n"
+            all_ready=0
             break
         fi
         if curl -fsS --max-time 30 "${auth_header[@]}" \
@@ -103,6 +115,18 @@ for i in $(seq 0 $((num_instances - 1))); do
             printf "ready\n"
         else
             printf "not ready\n"
+            all_ready=0
+        fi
+        break
+    fi
+
+    if [ "$service" = "boltz2" ] && is_hosted_api_url "$endpoint"; then
+        printf "%s " "$endpoint"
+        if [ -z "${api_key:-}" ]; then
+            printf "not ready (set BOLTZ2_API_KEY, NVIDIA_API_KEY, or NGC_API_KEY)\n"
+            all_ready=0
+        else
+            printf "configured (hosted endpoint; readiness is checked by prediction smoke tests)\n"
         fi
         break
     fi
@@ -113,5 +137,8 @@ for i in $(seq 0 $((num_instances - 1))); do
         printf "\n"
     else
         printf "not ready\n"
+        all_ready=0
     fi
 done
+
+[ "$all_ready" = "1" ]

@@ -16,9 +16,9 @@ This guide summarizes the dependencies and first-run workflow for implementing t
 - Enough local or shared storage for NIM image files and model caches.
 
 Docker with NVIDIA Container Toolkit is supported as an alternate workstation
-path and as the recommended Boltz-2 validation path on GB200/GB300 ARM systems
-that do not have Apptainer installed. See [`deployment.md`](deployment.md) for
-Docker details and current image architecture notes.
+path and as the recommended local Boltz-2 validation path on GB200/GB300 ARM
+systems that do not have Apptainer installed. See [`deployment.md`](deployment.md)
+for Docker details and current image architecture notes.
 
 ### NIM Services
 
@@ -28,8 +28,9 @@ The bootcamp notebooks expect BioNeMo NIM endpoints:
 - Boltz-2 NIM for protein-ligand affinity prediction.
 
 On x86 GPU clusters, both services can be self-hosted. On GB200, GB300, and
-other ARM64 nodes, the recommended path for this branch is to run Boltz-2
-locally and use a NVIDIA-hosted or x86-hosted MolMIM endpoint.
+other ARM64 nodes, the recommended path for this branch is to use a
+NVIDIA-hosted or x86-hosted MolMIM endpoint, then try local Boltz-2 with a
+hosted Boltz-2 fallback if prediction requests do not complete.
 
 The service wrapper starts these services and writes endpoint values to `.openhackathon-nims.env`:
 
@@ -42,6 +43,11 @@ For NVIDIA-hosted MolMIM, set `MOLMIM_URL` to
 `MOLMIM_API_KEY` or `NVIDIA_API_KEY` for bearer-token authentication. Hosted
 MolMIM supports generation, while local MolMIM NIMs also expose the latent
 `/hidden` and `/decode` endpoints used by CMA-ES notebooks.
+
+For NVIDIA-hosted Boltz-2 fallback, the wrapper uses
+`https://health.api.nvidia.com/v1/biology/mit/boltz2` by default and exports it
+as `BOLTZ2_URL`/`BOLTZ2_ENDPOINTS` when local Boltz-2 fails the prediction smoke
+test. Override it with `OPENHACKATHON_HOSTED_BOLTZ2_URL` or `--boltz2-url`.
 
 Always source `.openhackathon-nims.env` before running notebooks or scoring scripts.
 
@@ -86,14 +92,15 @@ jupyter-lab Start_Here.ipynb
 ```
 
 This creates `.venv`, installs the Python dependencies, starts one Boltz-2
-endpoint, configures MolMIM, waits for endpoint health checks, and writes
-`.openhackathon-nims.env`.
+endpoint, configures MolMIM, waits for endpoint health checks, runs a small
+Boltz-2 prediction smoke test, and writes `.openhackathon-nims.env`.
 
 The launch path is architecture-aware:
 
 - `x86_64`/`amd64`: try local MolMIM plus local Boltz-2, then fall back to
-  hosted MolMIM if local MolMIM does not become healthy.
-- `aarch64`/`arm64`: use hosted MolMIM plus local Boltz-2 by default.
+  hosted endpoints if local services do not pass their checks.
+- `aarch64`/`arm64`: use hosted MolMIM, try local Boltz-2, then fall back to
+  hosted Boltz-2 if local prediction requests hang or fail.
 
 For Docker-only GB200/GB300 ARM nodes, set the runtime and run the same
 bootstrap command:
@@ -106,11 +113,9 @@ scripts/bootstrap_bootcamp.sh --boltz2 1
 
 The Docker launcher selects `linux/arm64` automatically on `aarch64` hosts and
 checks that the image tag advertises that platform before pulling. Boltz-2
-`1.6.0` is the preferred ARM tag for GB200-class nodes and requires a
-590-series or newer NVIDIA driver with CUDA 13.1 support. This branch was
-validated on a GB200 ARM node with driver 595.58.03/CUDA 13.2 using
-`nvcr.io/nim/mit/boltz2:1.6.0`. On ARM hosts with a pre-590 NVIDIA driver, the
-launcher defaults Boltz-2 to `nvcr.io/nim/mit/boltz2:1.4.0`. The launching user
+`1.7.0` is the default ARM-capable tag for current local testing. On ARM hosts
+with a pre-590 NVIDIA driver, the launcher defaults Boltz-2 to
+`nvcr.io/nim/mit/boltz2:1.4.0`. The launching user
 must be able to run
 `docker ps` without an interactive sudo prompt; otherwise add the user to the
 Docker group or use an administrator managed launch shell.
@@ -120,8 +125,8 @@ The Docker path uses `--gpus` by default. Set
 `docker run --runtime=nvidia ...` is supported.
 
 The generated `.openhackathon-nims.env` records the selected MolMIM and Boltz-2
-URLs, plus notebook generation mode, so hosted MolMIM can be combined with
-local Boltz-2 without editing notebook code.
+URLs, plus notebook generation mode, so hosted MolMIM can be combined with local
+or hosted Boltz-2 without editing notebook code.
 
 ## Multi-GPU Notes
 

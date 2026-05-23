@@ -15,7 +15,7 @@ Environment:
   LOCAL_NIM_WORKSPACE      Host workspace directory. Default: LOCAL_NIM_CACHE/workspace
   SIF_DIR                  Directory for pulled .sif images. Default: ./.sif
   MOLMIM_IMAGE             Default: nvcr.io/nim/nvidia/molmim:1.0.0
-  BOLTZ2_IMAGE             Default: nvcr.io/nim/mit/boltz2:1.6.0
+  BOLTZ2_IMAGE             Default: nvcr.io/nim/mit/boltz2:1.7.0
   APPTAINER_BIN            Optional explicit runtime binary.
   APPTAINER_GPU_MODE       GPU setup mode: auto, nvccli, or nv. Default: auto.
   APPTAINER_PULL_ARGS      Optional extra args for apptainer/singularity pull.
@@ -60,7 +60,7 @@ case "$service" in
         sif_name="molmim_${image##*:}.sif"
         ;;
     boltz2)
-        image="${BOLTZ2_IMAGE:-nvcr.io/nim/mit/boltz2:1.6.0}"
+        image="${BOLTZ2_IMAGE:-nvcr.io/nim/mit/boltz2:1.7.0}"
         port="${port:-8000}"
         sif_name="boltz2_${image##*:}.sif"
         ;;

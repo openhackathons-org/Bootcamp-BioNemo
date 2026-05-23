@@ -54,15 +54,14 @@ and checks that each NIM image advertises that platform before pulling. The
 check uses `docker buildx imagetools inspect` when available and falls back to
 `docker manifest inspect` on minimal Docker installations.
 
-`nvcr.io/nim/mit/boltz2:1.6.0` advertises both `linux/amd64` and `linux/arm64`.
-NVIDIA's Boltz-2 `1.6.0` support matrix requires a 590-series or newer NVIDIA
-driver with CUDA 13.1 support for GB200-class ARM nodes. This branch was
-validated on a GB200 ARM node with driver 595.58.03/CUDA 13.2: the image pulled
-successfully, selected the GB200 profile, reached `/v1/health/ready`, and
-returned a real protein-ligand affinity response. On ARM hosts with a pre-590
-driver, the Docker launcher defaults Boltz-2 to
+`nvcr.io/nim/mit/boltz2:1.7.0` is the default local Boltz-2 image for current
+testing and advertises current local deployment support. On ARM hosts with a
+pre-590 driver, the Docker launcher defaults Boltz-2 to
 `nvcr.io/nim/mit/boltz2:1.4.0`. Set `BOLTZ2_IMAGE` to override this selection
-for a specific validation environment.
+for a specific validation environment. The service wrapper now verifies local
+Boltz-2 with a small prediction request after `/v1/health/ready`; if that smoke
+test fails in `auto` mode, `.openhackathon-nims.env` is written with the hosted
+Boltz-2 fallback URL instead of a local endpoint that may hang.
 
 The MolMIM `nvcr.io/nim/nvidia/molmim:1.0.0` image currently resolves as
 `linux/amd64`, so it is not a native ARM container for these nodes. For ARM
@@ -74,6 +73,11 @@ shared client add the bearer token automatically. For NVIDIA-hosted MolMIM, use
 hosted endpoint supports molecule generation; local MolMIM NIMs are still
 needed for latent-space `/hidden` and `/decode` CMA-ES workflows. Override
 `MOLMIM_IMAGE` only if NVIDIA publishes an ARM64 MolMIM tag.
+
+For NVIDIA-hosted Boltz-2 fallback, the default endpoint root is
+`https://health.api.nvidia.com/v1/biology/mit/boltz2`. Override it with
+`OPENHACKATHON_HOSTED_BOLTZ2_URL` or `scripts/openhackathon_services.sh start
+--boltz2-url ...`.
 
 The user running the wrapper must be able to access the Docker daemon. For
 interactive testing, `docker ps` should succeed without `sudo`. For unattended
@@ -96,13 +100,14 @@ scripts/openhackathon_services.sh status
 `scripts/openhackathon_services.sh start --boltz2 1` can still be used when
 Python dependencies are already installed. Its default `--molmim auto` mode
 uses local MolMIM on x86_64/amd64 with hosted fallback, and hosted MolMIM on
-aarch64/arm64.
+aarch64/arm64. Its default `--boltz2-mode auto` mode starts local Boltz-2, then
+falls back to hosted Boltz-2 if the prediction smoke test fails.
 
 If you need to force a platform or image tag for validation, set:
 
 ```bash
 export DOCKER_PLATFORM=linux/arm64
-export BOLTZ2_IMAGE=nvcr.io/nim/mit/boltz2:1.6.0
+export BOLTZ2_IMAGE=nvcr.io/nim/mit/boltz2:1.7.0
 ```
 
 On single-GPU ARM nodes, the default Docker GPU mode exposes that GPU with
@@ -154,7 +159,7 @@ docker run --rm -it --name boltz2 --gpus device=0 \
      -e TLLM_LOG_LEVEL=INFO \
      -v "$LOCAL_NIM_CACHE:/opt/nim/.cache" \
      -p 8000:8000 \
-     nvcr.io/nim/mit/boltz2:1.6.0
+     nvcr.io/nim/mit/boltz2:1.7.0
 ```
 
 ### ARM CUDA Readiness Check

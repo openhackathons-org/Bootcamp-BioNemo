@@ -34,7 +34,7 @@ import traceback
 import warnings
 warnings.filterwarnings('ignore')
 
-from endpoint_env import boltz2_endpoint_urls, load_openhackathon_env, normalize_endpoint_urls
+from endpoint_env import boltz2_client_kwargs, boltz2_endpoint_urls, load_openhackathon_env, normalize_endpoint_urls
 
 load_openhackathon_env()
 
@@ -275,7 +275,7 @@ class EndpointPool:
         try:
             if BOLTZ2_AVAILABLE:
                 # Create client and test with a simple request
-                client = Boltz2Client(base_url=endpoint, api_key="", timeout=10)
+                client = Boltz2Client(**boltz2_client_kwargs(endpoint, timeout=10))
                 
                 # Test with a minimal prediction request to verify the endpoint works
                 test_protein = Polymer(id="test_protein", sequence="MKLLKWAWLLLSKASSAHDKA")  # Short test sequence

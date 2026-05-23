@@ -84,6 +84,12 @@ export BOLTZ2_ENDPOINTS="http://gpu1:8000,http://gpu2:8000"
 export NVIDIA_API_KEY="your-api-key"
 ```
 
+For NVIDIA-hosted fallback, use `https://health.api.nvidia.com/v1/biology/nvidia/molmim`
+for MolMIM and `https://health.api.nvidia.com/v1/biology/mit/boltz2` for
+Boltz-2. Hosted MolMIM supports generation but not latent `/hidden` or
+`/decode`, so the pipeline automatically uses sampling instead of CMA-ES in
+that mode.
+
 **Option 2: Constructor Arguments**
 ```python
 from cdk_oracle import CDKConfig

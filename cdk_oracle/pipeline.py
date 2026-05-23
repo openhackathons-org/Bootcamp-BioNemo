@@ -290,6 +290,11 @@ class CDKDesignPipeline:
         popsize = popsize or self.config.cma_popsize
         top_k_for_boltz2 = top_k_for_boltz2 or max(1, popsize // 2)
         save_structures = save_structures if save_structures is not None else self.config.save_boltz2_structures
+
+        if use_cma and getattr(self.molmim, "hosted", False):
+            if verbose:
+                print("Hosted MolMIM does not expose latent /hidden or /decode endpoints; using generation sampling instead of CMA-ES.")
+            use_cma = False
         
         # Set reference for novelty scoring
         if reference_smiles:

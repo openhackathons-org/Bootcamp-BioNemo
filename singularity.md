@@ -13,14 +13,13 @@ For Docker-only GB200/GB300 ARM systems, use the Docker path in
 `scripts/run_nim_container.sh`, which chooses Apptainer/Singularity when
 available and Docker when explicitly requested or when it is the only available
 runtime. The Docker launcher checks requested image tags for native platform
-support before pulling; Boltz-2 `1.6.0` has an ARM64 manifest and MolMIM
-`1.0.0` does not. Boltz-2 `1.6.0` requires a 590-series or newer NVIDIA driver
-with CUDA 13.1 support on GB200-class ARM nodes. This branch was validated on a
-GB200 ARM node with driver 595.58.03/CUDA 13.2. ARM hosts that still run a
+support before pulling; Boltz-2 `1.7.0` is the current default local image and
+MolMIM `1.0.0` is not a native ARM container. ARM hosts that still run a
 pre-590 driver default to Boltz-2 `1.4.0` unless `BOLTZ2_IMAGE` is set. For ARM
-deployments, run only Boltz-2 locally and use a NVIDIA-hosted or x86-hosted
-MolMIM endpoint by setting `MOLMIM_URL` plus `MOLMIM_API_KEY` or
-`NVIDIA_API_KEY` when authentication is required.
+deployments, use a NVIDIA-hosted or x86-hosted MolMIM endpoint by setting
+`MOLMIM_URL` plus `MOLMIM_API_KEY` or `NVIDIA_API_KEY` when authentication is
+required. The wrapper tries local Boltz-2 and then falls back to hosted Boltz-2
+if a prediction smoke test fails.
 
 The Docker commands in NVIDIA NIM documentation map host ports with `-p`.
 Apptainer normally shares the host network namespace, so these scripts set
@@ -60,7 +59,8 @@ jupyter-lab
 This installs Python dependencies and starts:
 
 - MolMIM locally on x86_64/amd64, with hosted fallback
-- Boltz-2 at `http://localhost:8000`, or the next free port if `8000` is busy
+- Boltz-2 at `http://localhost:8000`, or the next free port if `8000` is busy,
+  with hosted fallback when the local prediction smoke test fails
 
 The selected endpoints are written to `.openhackathon-nims.env`. Always source
 that file before running notebooks or scoring jobs:
@@ -110,8 +110,8 @@ the cluster admins to enable non-setuid Apptainer/user namespace support for
 NVIDIA Container CLI integration.
 
 On the deployment test cluster, `--nvccli` was present but rejected by the
-setuid Apptainer install. The launcher fell back to plain `--nv`, and the
-validated path was one healthy MolMIM endpoint plus one healthy Boltz-2 endpoint.
+setuid Apptainer install. The launcher fell back to plain `--nv`, so use one
+local Boltz-2 endpoint per allocation unless the site confirms GPU isolation.
 
 ## Port Conflicts
 
@@ -147,6 +147,13 @@ MolMIM with hosted fallback on x86_64/amd64. The NVIDIA-hosted MolMIM endpoint
 supports molecule generation. Workflows that need MolMIM latent `/hidden` and
 `/decode` endpoints for CMA-ES should use a local or x86-hosted MolMIM NIM.
 
+By default, `--boltz2-mode auto` launches local Boltz-2 and checks both
+`/v1/health/ready` and a tiny prediction request. If local Boltz-2 reports ready
+but prediction workers cannot get a GPU, the wrapper falls back to
+`https://health.api.nvidia.com/v1/biology/mit/boltz2`. Set
+`OPENHACKATHON_BOLTZ2_SMOKE_TEST=0` only when you intentionally want to skip
+that prediction-level check.
+
 ## Manual Start: MolMIM
 
 The notebooks expect MolMIM at `http://localhost:8001` by default.
@@ -180,6 +187,7 @@ set `BOLTZ2_ENDPOINTS` explicitly:
 scripts/run_nim_apptainer.sh boltz2 8000 0
 scripts/launch_multiple_boltz2_apptainer.sh 3 8010
 scripts/check_nim_health.sh boltz2 8000 1
+scripts/check_boltz2_prediction.sh http://localhost:8000
 scripts/check_nim_health.sh boltz2 8010 3
 export BOLTZ2_ENDPOINTS="http://localhost:8000,http://localhost:8010,http://localhost:8011,http://localhost:8012"
 ```

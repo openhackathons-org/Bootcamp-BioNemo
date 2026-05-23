@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 
 def _candidate_env_files() -> Iterable[Path]:
@@ -60,10 +61,59 @@ def normalize_endpoint(value: str, base_url: str = "http://localhost") -> str:
     return base_url.rstrip("/")
 
 
+def is_nvidia_hosted_url(value: str) -> bool:
+    """Return True for NVIDIA API catalog endpoints."""
+    return "api.nvidia.com" in urlparse(value).netloc
+
+
+def normalize_boltz2_endpoint(value: str) -> str:
+    """Normalize a Boltz-2 endpoint root for direct REST calls."""
+    endpoint = normalize_endpoint(value).rstrip("/")
+    if endpoint.endswith("/biology/mit/boltz2/predict"):
+        endpoint = endpoint[:-len("/predict")]
+    return endpoint
+
+
+def boltz2_api_key() -> str:
+    """Return the preferred Boltz-2 API key from the environment."""
+    return (
+        os.environ.get("BOLTZ2_API_KEY")
+        or os.environ.get("NVIDIA_API_KEY")
+        or os.environ.get("NGC_API_KEY")
+        or ""
+    )
+
+
+def boltz2_client_base_url(value: str) -> str:
+    """Return the base_url expected by boltz2-python-client."""
+    endpoint = normalize_boltz2_endpoint(value)
+    if not is_nvidia_hosted_url(endpoint):
+        return endpoint
+
+    parsed = urlparse(endpoint)
+    if parsed.netloc == "integrate.api.nvidia.com":
+        parsed = parsed._replace(netloc="health.api.nvidia.com")
+    return urlunparse(parsed._replace(path="", params="", query="", fragment="")).rstrip("/")
+
+
+def boltz2_client_kwargs(value: str, api_key: str = "", timeout: Optional[int] = None) -> dict:
+    """Build Boltz2Client kwargs for local, external, or NVIDIA-hosted endpoints."""
+    endpoint = normalize_boltz2_endpoint(value)
+    kwargs = {
+        "base_url": boltz2_client_base_url(endpoint),
+        "api_key": api_key or boltz2_api_key() or None,
+    }
+    if is_nvidia_hosted_url(endpoint):
+        kwargs["endpoint_type"] = "nvidia_hosted"
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    return kwargs
+
+
 def normalize_endpoint_urls(value: str, base_url: str = "http://localhost") -> List[str]:
     return [
         endpoint
-        for endpoint in (normalize_endpoint(part, base_url) for part in value.split(","))
+        for endpoint in (normalize_boltz2_endpoint(normalize_endpoint(part, base_url)) for part in value.split(","))
         if endpoint
     ]
 

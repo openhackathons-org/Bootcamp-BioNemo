@@ -7,6 +7,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 venv_dir="${OPENHACKATHON_VENV:-$repo_root/.venv}"
 boltz2_count=1
 molmim_mode="${OPENHACKATHON_MOLMIM_MODE:-auto}"
+boltz2_mode="${OPENHACKATHON_BOLTZ2_MODE:-auto}"
 setup_python=1
 start_services=1
 execute_challenge=0
@@ -27,6 +28,8 @@ One-command bootcamp setup:
 
 Options:
   --boltz2 N              Number of local Boltz-2 endpoints to launch. Default: 1.
+  --boltz2-mode MODE      auto, local, hosted, or none. Default: auto.
+  --boltz2-url URL        Hosted/external Boltz-2 URL.
   --molmim MODE          auto, local, hosted, or none. Default: auto.
   --molmim-url URL       Hosted/external MolMIM URL.
   --container-runtime R  auto, apptainer, singularity, or docker.
@@ -39,11 +42,12 @@ Options:
 Environment:
   NGC_API_KEY is required when services are started.
   OPENHACKATHON_HOSTED_MOLMIM_URL overrides the NVIDIA-hosted MolMIM URL.
+  OPENHACKATHON_HOSTED_BOLTZ2_URL overrides the NVIDIA-hosted Boltz-2 URL.
   OPENHACKATHON_VENV overrides the virtual environment directory.
 
 Architecture behavior:
-  x86_64/amd64: start local MolMIM plus local Boltz-2; fall back to hosted MolMIM.
-  aarch64/arm64: use hosted MolMIM plus local Boltz-2.
+  x86_64/amd64: start local MolMIM plus local Boltz-2; fall back to hosted endpoints.
+  aarch64/arm64: use hosted MolMIM, try local Boltz-2, then fall back to hosted Boltz-2.
 EOF
 }
 
@@ -51,6 +55,14 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --boltz2)
             boltz2_count="$2"
+            shift 2
+            ;;
+        --boltz2-mode)
+            boltz2_mode="$2"
+            shift 2
+            ;;
+        --boltz2-url|--hosted-boltz2-url)
+            extra_service_args+=(--boltz2-url "$2")
             shift 2
             ;;
         --molmim)
@@ -118,8 +130,10 @@ fi
 
 if [ "$start_services" = "1" ]; then
     OPENHACKATHON_MOLMIM_MODE="$molmim_mode" \
+    OPENHACKATHON_BOLTZ2_MODE="$boltz2_mode" \
         "$repo_root/scripts/openhackathon_services.sh" start \
         --boltz2 "$boltz2_count" \
+        --boltz2-mode "$boltz2_mode" \
         --molmim "$molmim_mode" \
         "${extra_service_args[@]}"
 fi

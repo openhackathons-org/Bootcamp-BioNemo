@@ -33,7 +33,7 @@ from typing import Dict, List, Tuple, Optional, Any
 import warnings
 warnings.filterwarnings('ignore')
 
-from endpoint_env import load_openhackathon_env
+from endpoint_env import boltz2_api_key, boltz2_client_kwargs, load_openhackathon_env, normalize_boltz2_endpoint
 
 load_openhackathon_env()
 
@@ -71,8 +71,8 @@ except ImportError as e:
 BASE_DIR = Path(__file__).resolve().parent
 
 CONFIG = {
-    "boltz2_url": os.environ.get("BOLTZ2_URL", "http://localhost:8000"),
-    "boltz2_api_key": os.environ.get("BOLTZ2_API_KEY", ""),
+    "boltz2_url": normalize_boltz2_endpoint(os.environ.get("BOLTZ2_URL", "http://localhost:8000")),
+    "boltz2_api_key": boltz2_api_key(),
     "chembl_data_path": str(BASE_DIR / "chembl_data"),
     "novelty_cutoff": 0.85,
     "top_n_compounds": 25,
@@ -474,10 +474,10 @@ def predict_binding_affinity_boltz2(smiles: str, protein_target: str,
             print_rt(f"Endpoint: {CONFIG['boltz2_url']}")
             
             # Initialize Boltz2 client
-            client = Boltz2Client(
-                base_url=CONFIG['boltz2_url'],
-                api_key=CONFIG.get("boltz2_api_key") if CONFIG.get("boltz2_api_key") else None
-            )
+            client = Boltz2Client(**boltz2_client_kwargs(
+                CONFIG["boltz2_url"],
+                api_key=CONFIG.get("boltz2_api_key", "")
+            ))
             
             # Create prediction input
             protein_sequence = CDK_PROTEIN_INFO[protein_target]["sequence"]

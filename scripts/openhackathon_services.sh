@@ -12,23 +12,30 @@ boltz2_port="${BOLTZ2_PORT:-8000}"
 extra_boltz2_start_port="${EXTRA_BOLTZ2_START_PORT:-8010}"
 boltz2_count=1
 start_molmim=1
+start_boltz2=1
 molmim_url_override=""
+boltz2_url_override=""
 external_molmim_url=""
+external_boltz2_url=""
 auto_ports="${OPENHACKATHON_AUTO_PORTS:-1}"
 detected_arch="${OPENHACKATHON_ARCH:-$(uname -m)}"
 hosted_molmim_url="${OPENHACKATHON_HOSTED_MOLMIM_URL:-https://health.api.nvidia.com/v1/biology/nvidia/molmim}"
+hosted_boltz2_url="${OPENHACKATHON_HOSTED_BOLTZ2_URL:-https://health.api.nvidia.com/v1/biology/mit/boltz2}"
 molmim_mode="${OPENHACKATHON_MOLMIM_MODE:-auto}"
+boltz2_mode="${OPENHACKATHON_BOLTZ2_MODE:-auto}"
 wait_for_ready="${OPENHACKATHON_WAIT_FOR_READY:-1}"
 ready_poll_seconds="${OPENHACKATHON_READY_POLL_SECONDS:-10}"
 molmim_ready_timeout="${OPENHACKATHON_MOLMIM_READY_TIMEOUT:-900}"
 boltz2_ready_timeout="${OPENHACKATHON_BOLTZ2_READY_TIMEOUT:-1800}"
+boltz2_predict_timeout="${OPENHACKATHON_BOLTZ2_PREDICT_TIMEOUT:-300}"
+boltz2_smoke_test="${OPENHACKATHON_BOLTZ2_SMOKE_TEST:-1}"
 resolved_boltz2_ports=()
 reserved_ports=()
 
 usage() {
     cat <<'EOF'
 Usage:
-  scripts/openhackathon_services.sh start [--boltz2 N] [--molmim auto|local|hosted|none] [--molmim-url URL]
+  scripts/openhackathon_services.sh start [--boltz2 N] [--boltz2-mode auto|local|hosted|none] [--boltz2-url URL] [--molmim auto|local|hosted|none] [--molmim-url URL]
   scripts/openhackathon_services.sh stop
   scripts/openhackathon_services.sh status
   scripts/openhackathon_services.sh env
@@ -51,6 +58,12 @@ MolMIM selection:
   hosted  use hosted MolMIM and do not launch local MolMIM.
   none    do not configure or launch MolMIM.
 
+Boltz-2 selection:
+  auto    try local Boltz-2 first, then hosted fallback if the prediction smoke test fails.
+  local   require local Boltz-2 NIM.
+  hosted  use hosted Boltz-2 and do not launch local Boltz-2.
+  none    do not configure or launch Boltz-2.
+
 Environment overrides:
   MOLMIM_PORT, BOLTZ2_PORT, EXTRA_BOLTZ2_START_PORT
   OPENHACKATHON_LOG_DIR, OPENHACKATHON_ENV_FILE
@@ -59,9 +72,13 @@ Environment overrides:
   OPENHACKATHON_DOCKER_GPU_MODE=device|all
   OPENHACKATHON_DOCKER_USE_NVIDIA_RUNTIME=0|1
   OPENHACKATHON_MOLMIM_MODE=auto|local|hosted|none
+  OPENHACKATHON_BOLTZ2_MODE=auto|local|hosted|none
   OPENHACKATHON_HOSTED_MOLMIM_URL=https://health.api.nvidia.com/v1/biology/nvidia/molmim
+  OPENHACKATHON_HOSTED_BOLTZ2_URL=https://health.api.nvidia.com/v1/biology/mit/boltz2
   OPENHACKATHON_WAIT_FOR_READY=0 to return immediately after launching
   OPENHACKATHON_MOLMIM_READY_TIMEOUT, OPENHACKATHON_BOLTZ2_READY_TIMEOUT
+  OPENHACKATHON_BOLTZ2_SMOKE_TEST=0 to skip the prediction-level Boltz-2 check
+  OPENHACKATHON_BOLTZ2_PREDICT_TIMEOUT controls the smoke-test timeout
   NGC_API_KEY, NVIDIA_API_KEY, MOLMIM_API_KEY, LOCAL_NIM_CACHE, LOCAL_NIM_WORKSPACE, SIF_DIR
   MOLMIM_IMAGE, BOLTZ2_IMAGE
 EOF
@@ -197,6 +214,36 @@ is_external_url() {
     esac
 }
 
+is_hosted_api_url() {
+    printf '%s\n' "$1" | grep -q 'api\.nvidia\.com'
+}
+
+has_molmim_api_key() {
+    [ -n "${MOLMIM_API_KEY:-${NVIDIA_API_KEY:-${NGC_API_KEY:-}}}" ]
+}
+
+has_boltz2_api_key() {
+    [ -n "${BOLTZ2_API_KEY:-${NVIDIA_API_KEY:-${NGC_API_KEY:-}}}" ]
+}
+
+require_hosted_api_key() {
+    local service="$1"
+    local endpoint="$2"
+
+    is_hosted_api_url "$endpoint" || return 0
+    case "$service" in
+        molmim)
+            has_molmim_api_key && return 0
+            echo "Error: hosted MolMIM requires MOLMIM_API_KEY, NVIDIA_API_KEY, or NGC_API_KEY." >&2
+            ;;
+        boltz2)
+            has_boltz2_api_key && return 0
+            echo "Error: hosted Boltz-2 requires BOLTZ2_API_KEY, NVIDIA_API_KEY, or NGC_API_KEY." >&2
+            ;;
+    esac
+    return 1
+}
+
 show_service_log_tail() {
     local name="$1"
     local log_file="$log_dir/$name.log"
@@ -240,6 +287,25 @@ wait_until_ready() {
     return 1
 }
 
+run_boltz2_smoke_test() {
+    local endpoint="$1"
+    local name="${2:-}"
+
+    if [ "$wait_for_ready" != "1" ] || [ "$boltz2_smoke_test" != "1" ]; then
+        return 0
+    fi
+
+    if "$repo_root/scripts/check_boltz2_prediction.sh" "$endpoint" "$boltz2_predict_timeout"; then
+        return 0
+    fi
+
+    echo "Boltz-2 prediction smoke test failed for $endpoint" >&2
+    if [ -n "$name" ]; then
+        show_service_log_tail "$name"
+    fi
+    return 1
+}
+
 validate_molmim_mode() {
     case "$molmim_mode" in
         auto|local|hosted|none)
@@ -251,14 +317,54 @@ validate_molmim_mode() {
     esac
 }
 
+validate_boltz2_mode() {
+    case "$boltz2_mode" in
+        auto|local|hosted|none)
+            ;;
+        *)
+            echo "Error: Boltz-2 mode must be auto, local, hosted, or none." >&2
+            exit 1
+            ;;
+    esac
+}
+
+boltz2_endpoint_list() {
+    if [ "$start_boltz2" -eq 0 ] && [ -n "$external_boltz2_url" ]; then
+        printf '%s\n' "$external_boltz2_url"
+        return 0
+    fi
+    if [ "$start_boltz2" -eq 0 ]; then
+        return 0
+    fi
+
+    if [ "${#resolved_boltz2_ports[@]}" -gt 0 ]; then
+        local i
+        for i in $(seq 0 $((${#resolved_boltz2_ports[@]} - 1))); do
+            printf 'http://localhost:%s\n' "${resolved_boltz2_ports[$i]}"
+        done
+        return 0
+    fi
+
+    if is_external_url "${BOLTZ2_URL:-}"; then
+        printf '%s\n' "$BOLTZ2_URL"
+        return 0
+    fi
+
+    local i
+    for i in $(seq 0 $((boltz2_count - 1))); do
+        printf 'http://localhost:%s\n' "$(port_for_boltz2 "$i")"
+    done
+}
+
 write_env_file() {
     local endpoints=()
-    for i in $(seq 0 $((boltz2_count - 1))); do
-        endpoints+=("http://localhost:$(port_for_boltz2 "$i")")
-    done
+    local endpoint
+    while IFS= read -r endpoint; do
+        [ -n "$endpoint" ] && endpoints+=("$endpoint")
+    done < <(boltz2_endpoint_list)
 
     local output_molmim_url="$external_molmim_url"
-    if [ -z "$output_molmim_url" ]; then
+    if [ -z "$output_molmim_url" ] && [ "$start_molmim" -eq 1 ]; then
         output_molmim_url="${molmim_url_override:-${MOLMIM_URL:-}}"
     fi
 
@@ -280,10 +386,20 @@ write_env_file() {
             echo "export OPENHACKATHON_ACTIVE_MOLMIM_MODE=\"none\""
             echo "export OPENHACKATHON_USE_CMA=\"0\""
         fi
-        echo "export BOLTZ2_URL=\"${endpoints[0]}\""
-        local joined
-        joined="$(IFS=,; echo "${endpoints[*]}")"
-        echo "export BOLTZ2_ENDPOINTS=\"$joined\""
+        if [ "${#endpoints[@]}" -gt 0 ]; then
+            echo "export BOLTZ2_URL=\"${endpoints[0]}\""
+            local joined
+            joined="$(IFS=,; echo "${endpoints[*]}")"
+            echo "export BOLTZ2_ENDPOINTS=\"$joined\""
+            if [ "$start_boltz2" -eq 0 ] && [ -n "$external_boltz2_url" ]; then
+                echo "export OPENHACKATHON_ACTIVE_BOLTZ2_MODE=\"hosted\""
+            else
+                echo "export OPENHACKATHON_ACTIVE_BOLTZ2_MODE=\"local\""
+            fi
+        else
+            echo "# BOLTZ2_URL is not set. Export BOLTZ2_URL to a hosted Boltz-2 endpoint or start local Boltz-2."
+            echo "export OPENHACKATHON_ACTIVE_BOLTZ2_MODE=\"none\""
+        fi
     } > "$env_file"
 }
 
@@ -316,12 +432,9 @@ start_service() {
 cmd_start() {
     mkdir -p "$log_dir"
     local requested_molmim_url="${MOLMIM_URL:-}"
+    local requested_boltz2_url="${BOLTZ2_URL:-}"
     validate_molmim_mode
-
-    if [ -z "${NGC_API_KEY:-}" ]; then
-        echo "Error: NGC_API_KEY is required." >&2
-        exit 1
-    fi
+    validate_boltz2_mode
 
     if [ -f "$env_file" ]; then
         # shellcheck disable=SC1090
@@ -329,6 +442,7 @@ cmd_start() {
     fi
 
     local env_molmim_url="${MOLMIM_URL:-}"
+    local env_boltz2_url="${BOLTZ2_URL:-}"
     case "$molmim_mode" in
         auto)
             if [ -n "$molmim_url_override" ]; then
@@ -349,7 +463,7 @@ cmd_start() {
                 if is_external_url "$env_molmim_url"; then
                     external_molmim_url="$env_molmim_url"
                 else
-                    external_molmim_url="${molmim_url_override:-${requested_molmim_url:-$hosted_molmim_url}}"
+                    external_molmim_url="${molmim_url_override:-$hosted_molmim_url}"
                 fi
             fi
             ;;
@@ -359,17 +473,82 @@ cmd_start() {
             ;;
         hosted)
             start_molmim=0
-            external_molmim_url="${molmim_url_override:-${requested_molmim_url:-${env_molmim_url:-$hosted_molmim_url}}}"
+            if [ -n "$molmim_url_override" ]; then
+                external_molmim_url="$molmim_url_override"
+            elif is_external_url "$requested_molmim_url"; then
+                external_molmim_url="$requested_molmim_url"
+            elif is_external_url "$env_molmim_url"; then
+                external_molmim_url="$env_molmim_url"
+            else
+                external_molmim_url="$hosted_molmim_url"
+            fi
             ;;
         none)
             start_molmim=0
-            external_molmim_url="${molmim_url_override:-${requested_molmim_url:-}}"
+            external_molmim_url="${molmim_url_override:-}"
+            ;;
+    esac
+
+    case "$boltz2_mode" in
+        auto)
+            if [ -n "$boltz2_url_override" ]; then
+                start_boltz2=0
+                external_boltz2_url="$boltz2_url_override"
+            elif is_external_url "$requested_boltz2_url"; then
+                start_boltz2=0
+                external_boltz2_url="$requested_boltz2_url"
+            else
+                start_boltz2=1
+                if is_external_url "$env_boltz2_url"; then
+                    external_boltz2_url="$env_boltz2_url"
+                else
+                    external_boltz2_url="$hosted_boltz2_url"
+                fi
+            fi
+            ;;
+        local)
+            start_boltz2=1
+            external_boltz2_url="${boltz2_url_override:-${requested_boltz2_url:-$hosted_boltz2_url}}"
+            ;;
+        hosted)
+            start_boltz2=0
+            if [ -n "$boltz2_url_override" ]; then
+                external_boltz2_url="$boltz2_url_override"
+            elif is_external_url "$requested_boltz2_url"; then
+                external_boltz2_url="$requested_boltz2_url"
+            elif is_external_url "$env_boltz2_url"; then
+                external_boltz2_url="$env_boltz2_url"
+            else
+                external_boltz2_url="$hosted_boltz2_url"
+            fi
+            ;;
+        none)
+            start_boltz2=0
+            external_boltz2_url="${boltz2_url_override:-}"
             ;;
     esac
 
     if [ "$start_molmim" -eq 0 ] && [ -z "$external_molmim_url" ]; then
         echo "Warning: MolMIM will not be launched locally and no hosted MOLMIM_URL was provided." >&2
         echo "         Set MOLMIM_URL, pass --molmim-url, or use --molmim auto/local/hosted." >&2
+    fi
+
+    if [ "$start_boltz2" -eq 0 ] && [ -z "$external_boltz2_url" ]; then
+        echo "Warning: Boltz-2 will not be launched locally and no hosted BOLTZ2_URL was provided." >&2
+        echo "         Set BOLTZ2_URL, pass --boltz2-url, or use --boltz2-mode auto/local/hosted." >&2
+    fi
+
+    if { [ "$start_molmim" -eq 1 ] || [ "$start_boltz2" -eq 1 ]; } && [ -z "${NGC_API_KEY:-}" ]; then
+        echo "Error: NGC_API_KEY is required to launch local NIM containers." >&2
+        echo "       For hosted-only mode, set --molmim hosted --boltz2-mode hosted and export NVIDIA_API_KEY or service-specific API keys." >&2
+        exit 1
+    fi
+
+    if [ "$start_molmim" -eq 0 ] && [ -n "$external_molmim_url" ]; then
+        require_hosted_api_key "molmim" "$external_molmim_url" || exit 1
+    fi
+    if [ "$start_boltz2" -eq 0 ] && [ -n "$external_boltz2_url" ]; then
+        require_hosted_api_key "boltz2" "$external_boltz2_url" || exit 1
     fi
 
     echo "Detected architecture: $detected_arch"
@@ -379,6 +558,13 @@ cmd_start() {
         echo "MolMIM mode: hosted/external ($external_molmim_url)"
     else
         echo "MolMIM mode: none"
+    fi
+    if [ "$start_boltz2" -eq 1 ]; then
+        echo "Boltz-2 mode: local with hosted fallback ($external_boltz2_url)"
+    elif [ -n "$external_boltz2_url" ]; then
+        echo "Boltz-2 mode: hosted/external ($external_boltz2_url)"
+    else
+        echo "Boltz-2 mode: none"
     fi
 
     local gpu_count=1
@@ -409,42 +595,87 @@ cmd_start() {
         fi
     fi
 
-    local existing_boltz2_endpoints="${BOLTZ2_ENDPOINTS:-}"
-    local existing_boltz2_urls=()
-    if [ -n "$existing_boltz2_endpoints" ]; then
-        IFS=',' read -r -a existing_boltz2_urls <<< "$existing_boltz2_endpoints"
+    if [ "$start_boltz2" -eq 1 ]; then
+        local existing_boltz2_endpoints="${BOLTZ2_ENDPOINTS:-}"
+        local existing_boltz2_urls=()
+        if [ -n "$existing_boltz2_endpoints" ]; then
+            IFS=',' read -r -a existing_boltz2_urls <<< "$existing_boltz2_endpoints"
+        fi
+
+        for i in $(seq 0 $((boltz2_count - 1))); do
+            local desired_port
+            local actual_port
+            if service_is_running "boltz2-$i" && [ "${#existing_boltz2_urls[@]}" -gt "$i" ]; then
+                actual_port="$(env_url_port "${existing_boltz2_urls[$i]}")"
+            else
+                desired_port="$(port_for_boltz2 "$i")"
+                actual_port="$(resolve_port "boltz2-$i" "$desired_port")"
+            fi
+            resolved_boltz2_ports+=("$actual_port")
+            reserved_ports+=("$actual_port")
+            start_service "boltz2-$i" "boltz2" "$actual_port" "$((i % gpu_count))"
+            sleep 2
+        done
     fi
 
-    for i in $(seq 0 $((boltz2_count - 1))); do
-        local desired_port
-        local actual_port
-        if service_is_running "boltz2-$i" && [ "${#existing_boltz2_urls[@]}" -gt "$i" ]; then
-            actual_port="$(env_url_port "${existing_boltz2_urls[$i]}")"
-        else
-            desired_port="$(port_for_boltz2 "$i")"
-            actual_port="$(resolve_port "boltz2-$i" "$desired_port")"
-        fi
-        resolved_boltz2_ports+=("$actual_port")
-        reserved_ports+=("$actual_port")
-        start_service "boltz2-$i" "boltz2" "$actual_port" "$((i % gpu_count))"
-        sleep 2
-    done
-
-    write_env_file
-
     if [ "$start_molmim" -eq 0 ] && [ -n "$external_molmim_url" ]; then
+        require_hosted_api_key "molmim" "$external_molmim_url" || exit 1
         wait_until_ready "molmim" "$external_molmim_url" "$molmim_ready_timeout" || {
             echo "Error: hosted/external MolMIM is not ready." >&2
             exit 1
         }
     fi
 
-    for i in $(seq 0 $((boltz2_count - 1))); do
-        wait_until_ready "boltz2" "http://localhost:$(port_for_boltz2 "$i")" "$boltz2_ready_timeout" "boltz2-$i" || {
-            echo "Error: Boltz-2 endpoint $i is not ready." >&2
+    if [ "$start_boltz2" -eq 1 ]; then
+        local boltz2_failed=0
+        for i in $(seq 0 $((boltz2_count - 1))); do
+            local boltz2_endpoint="http://localhost:$(port_for_boltz2 "$i")"
+            wait_until_ready "boltz2" "$boltz2_endpoint" "$boltz2_ready_timeout" "boltz2-$i" || {
+                echo "Error: Boltz-2 endpoint $i is not ready." >&2
+                boltz2_failed=1
+                break
+            }
+            run_boltz2_smoke_test "$boltz2_endpoint" "boltz2-$i" || {
+                boltz2_failed=1
+                break
+            }
+        done
+
+        if [ "$boltz2_failed" -eq 1 ]; then
+            if [ "$boltz2_mode" = "auto" ] && [ -n "$external_boltz2_url" ]; then
+                echo "Local Boltz-2 failed the readiness/prediction check; falling back to hosted/external Boltz-2."
+                for i in $(seq 0 $((boltz2_count - 1))); do
+                    stop_service_by_name "boltz2-$i"
+                done
+                start_boltz2=0
+                resolved_boltz2_ports=()
+                require_hosted_api_key "boltz2" "$external_boltz2_url" || exit 1
+                wait_until_ready "boltz2" "$external_boltz2_url" "$boltz2_ready_timeout" || {
+                    echo "Error: hosted/external Boltz-2 is not configured." >&2
+                    exit 1
+                }
+                run_boltz2_smoke_test "$external_boltz2_url" || {
+                    echo "Error: hosted/external Boltz-2 did not pass the prediction smoke test." >&2
+                    exit 1
+                }
+            else
+                echo "Error: local Boltz-2 did not pass readiness checks." >&2
+                exit 1
+            fi
+        fi
+    elif [ -n "$external_boltz2_url" ]; then
+        require_hosted_api_key "boltz2" "$external_boltz2_url" || exit 1
+        wait_until_ready "boltz2" "$external_boltz2_url" "$boltz2_ready_timeout" || {
+            echo "Error: hosted/external Boltz-2 is not configured." >&2
             exit 1
         }
-    done
+        run_boltz2_smoke_test "$external_boltz2_url" || {
+            echo "Error: hosted/external Boltz-2 did not pass the prediction smoke test." >&2
+            exit 1
+        }
+    fi
+
+    write_env_file
 
     echo ""
     echo "Environment written to: $env_file"
@@ -491,6 +722,7 @@ cmd_status() {
 
     echo "Architecture: $detected_arch"
     echo "MolMIM mode: ${OPENHACKATHON_ACTIVE_MOLMIM_MODE:-$molmim_mode}"
+    echo "Boltz-2 mode: ${OPENHACKATHON_ACTIVE_BOLTZ2_MODE:-$boltz2_mode}"
     echo "Logs: $log_dir"
     if [ -n "${MOLMIM_URL:-}" ]; then
         "$repo_root/scripts/check_nim_health.sh" molmim "$MOLMIM_URL" 1 || true
@@ -498,17 +730,92 @@ cmd_status() {
         echo "MolMIM URL is not configured. Set MOLMIM_URL to a hosted endpoint or start local MolMIM."
     fi
 
-    local endpoints="${BOLTZ2_ENDPOINTS:-http://localhost:$boltz2_port}"
-    IFS=',' read -r -a urls <<< "$endpoints"
-    for url in "${urls[@]}"; do
-        "$repo_root/scripts/check_nim_health.sh" boltz2 "$url" 1 || true
-    done
+    if [ -n "${BOLTZ2_ENDPOINTS:-${BOLTZ2_URL:-}}" ]; then
+        local endpoints="${BOLTZ2_ENDPOINTS:-$BOLTZ2_URL}"
+        IFS=',' read -r -a urls <<< "$endpoints"
+        for url in "${urls[@]}"; do
+            "$repo_root/scripts/check_nim_health.sh" boltz2 "$url" 1 || true
+        done
+    else
+        echo "Boltz-2 URL is not configured. Set BOLTZ2_URL to a hosted endpoint or start local Boltz-2."
+    fi
 }
 
 cmd_env() {
-    if [ ! -f "$env_file" ] || [ "$start_molmim" -eq 0 ] || [ -n "$molmim_url_override" ]; then
-        write_env_file
+    validate_molmim_mode
+    validate_boltz2_mode
+
+    if [ -f "$env_file" ]; then
+        # shellcheck disable=SC1090
+        source "$env_file"
     fi
+
+    case "$molmim_mode" in
+        hosted)
+            start_molmim=0
+            if [ -n "$molmim_url_override" ]; then
+                external_molmim_url="$molmim_url_override"
+            elif is_external_url "${MOLMIM_URL:-}"; then
+                external_molmim_url="$MOLMIM_URL"
+            else
+                external_molmim_url="$hosted_molmim_url"
+            fi
+            ;;
+        none)
+            start_molmim=0
+            external_molmim_url="${molmim_url_override:-}"
+            ;;
+        local)
+            start_molmim=1
+            ;;
+        auto)
+            if [ -n "$molmim_url_override" ]; then
+                start_molmim=0
+                external_molmim_url="$molmim_url_override"
+            elif is_external_url "${MOLMIM_URL:-}"; then
+                start_molmim=0
+                external_molmim_url="$MOLMIM_URL"
+            elif is_arm_arch; then
+                start_molmim=0
+                external_molmim_url="$hosted_molmim_url"
+            else
+                start_molmim=1
+            fi
+            ;;
+    esac
+
+    case "$boltz2_mode" in
+        hosted)
+            start_boltz2=0
+            if [ -n "$boltz2_url_override" ]; then
+                external_boltz2_url="$boltz2_url_override"
+            elif is_external_url "${BOLTZ2_URL:-}"; then
+                external_boltz2_url="$BOLTZ2_URL"
+            else
+                external_boltz2_url="$hosted_boltz2_url"
+            fi
+            ;;
+        none)
+            start_boltz2=0
+            external_boltz2_url="${boltz2_url_override:-}"
+            ;;
+        local)
+            start_boltz2=1
+            ;;
+        auto)
+            if [ -n "$boltz2_url_override" ]; then
+                start_boltz2=0
+                external_boltz2_url="$boltz2_url_override"
+            elif is_external_url "${BOLTZ2_URL:-}"; then
+                start_boltz2=0
+                external_boltz2_url="$BOLTZ2_URL"
+            else
+                start_boltz2=1
+            fi
+            ;;
+    esac
+
+    write_env_file
     cat "$env_file"
 }
 
@@ -519,6 +826,22 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --boltz2)
             boltz2_count="$2"
+            shift 2
+            ;;
+        --boltz2-mode)
+            boltz2_mode="$2"
+            shift 2
+            ;;
+        --no-boltz2)
+            boltz2_mode="none"
+            start_boltz2=0
+            shift
+            ;;
+        --boltz2-url|--hosted-boltz2-url)
+            boltz2_url_override="$2"
+            external_boltz2_url="$2"
+            boltz2_mode="hosted"
+            start_boltz2=0
             shift 2
             ;;
         --molmim)

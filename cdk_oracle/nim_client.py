@@ -39,7 +39,65 @@ def _hosted_molmim_generate_url(url: str) -> str:
     if "/biology/nvidia/molmim" in parsed.path:
         return f"{normalized}/generate"
 
+    if _is_hosted_molmim_url(normalized):
+        if parsed.path.rstrip("/") == "/v1":
+            return f"{normalized}/biology/nvidia/molmim/generate"
+        if parsed.path in ("", "/"):
+            return f"{normalized}/v1/biology/nvidia/molmim/generate"
+
     return f"{normalized}/biology/nvidia/molmim/generate"
+
+
+def _is_hosted_boltz2_url(url: str) -> bool:
+    """Return True for NVIDIA hosted Boltz-2 API endpoints."""
+    return "api.nvidia.com" in urlparse(url).netloc
+
+
+def _normalize_boltz2_base_url(url: str) -> str:
+    """Normalize Boltz-2 endpoint roots for the Python client."""
+    normalized = url.rstrip("/")
+    if normalized.endswith("/biology/mit/boltz2/predict"):
+        return normalized[:-len("/predict")]
+    return normalized
+
+
+def _boltz2_client_base_url(url: str) -> str:
+    """Return the base URL shape expected by boltz2-python-client."""
+    normalized = _normalize_boltz2_base_url(url)
+    if not _is_hosted_boltz2_url(normalized):
+        return normalized
+
+    parsed = urlparse(normalized)
+    if parsed.netloc == "integrate.api.nvidia.com":
+        parsed = parsed._replace(netloc="health.api.nvidia.com")
+    return urlunparse(parsed._replace(path="", params="", query="", fragment="")).rstrip("/")
+
+
+def _boltz2_client_kwargs(url: str, api_key: str = None) -> Dict[str, Any]:
+    """Build Boltz2Client kwargs for local NIMs or NVIDIA-hosted API catalog."""
+    normalized = _normalize_boltz2_base_url(url)
+    kwargs = {
+        "base_url": _boltz2_client_base_url(normalized),
+        "api_key": api_key,
+    }
+    if _is_hosted_boltz2_url(normalized):
+        kwargs["endpoint_type"] = "nvidia_hosted"
+    return kwargs
+
+
+def is_hosted_boltz2_url(url: str) -> bool:
+    """Public helper for notebooks and scripts that need hosted-mode branching."""
+    return _is_hosted_boltz2_url(url)
+
+
+def normalize_boltz2_url(url: str) -> str:
+    """Public helper that normalizes Boltz-2 REST endpoint roots."""
+    return _normalize_boltz2_base_url(url)
+
+
+def boltz2_client_kwargs(url: str, api_key: str = None) -> Dict[str, Any]:
+    """Public helper for constructing Boltz2Client arguments."""
+    return _boltz2_client_kwargs(url, api_key=api_key)
 
 
 @dataclass
@@ -113,7 +171,12 @@ class NIMHealthChecker:
             if ak:
                 headers["Authorization"] = f"Bearer {ak}"
 
-            response = requests.get(f"{url}/v1/health/ready", headers=headers, timeout=5)
+            if _is_hosted_boltz2_url(url):
+                if ak:
+                    return NIMStatus(label, url, True, "Hosted endpoint configured")
+                return NIMStatus(label, url, False, "Hosted endpoint requires BOLTZ2_API_KEY, NVIDIA_API_KEY, or NGC_API_KEY")
+
+            response = requests.get(f"{_normalize_boltz2_base_url(url)}/v1/health/ready", headers=headers, timeout=5)
             if response.status_code == 200:
                 return NIMStatus(label, url, True, "Service is healthy")
 
@@ -282,12 +345,14 @@ class MolMIMClient:
         response.raise_for_status()
 
         body = response.json()
-        molecules = body.get("molecules", body.get("samples", []))
+        molecules = body.get("molecules", body.get("samples", body.get("generated", [])))
         if isinstance(molecules, str):
             try:
                 molecules = json.loads(molecules)
             except json.JSONDecodeError:
                 molecules = [molecules]
+        if molecules and isinstance(molecules[0], list):
+            molecules = molecules[0]
 
         samples = []
         for entry in molecules:
@@ -326,7 +391,8 @@ class MolMIMClient:
         response = requests.post(url, headers=self._headers(), json=payload, timeout=60)
         response.raise_for_status()
 
-        return response.json().get("samples", [])
+        body = response.json()
+        return body.get("samples", body.get("generated", []))
 
 
 class Boltz2AffinityClient:
@@ -348,10 +414,13 @@ class Boltz2AffinityClient:
 
         # Set up endpoint pool
         if endpoints:
-            self.endpoints = endpoints
+            self.endpoints = [
+                {**ep, "url": _normalize_boltz2_base_url(ep.get("url", self.config.boltz2_url))}
+                for ep in endpoints
+            ]
         else:
             self.endpoints = [{
-                "url": self.config.boltz2_url,
+                "url": _normalize_boltz2_base_url(self.config.boltz2_url),
                 "api_key": self.config.boltz2_api_key
             }]
 
@@ -456,7 +525,7 @@ class Boltz2AffinityClient:
         PocketConstraint = self._client_module["PocketConstraint"]
         AlignmentFileRecord = self._client_module["AlignmentFileRecord"]
 
-        client = Boltz2Client(base_url=base_url, api_key=api_key)
+        client = Boltz2Client(**_boltz2_client_kwargs(base_url, api_key=api_key))
 
         try:
             polymer_kwargs = {"id": "A", "molecule_type": "protein", "sequence": sequence}

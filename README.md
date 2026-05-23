@@ -11,7 +11,7 @@ This bootcamp combines comprehensive tutorials with a cutting-edge hackathon cha
 
 ## Repository Structure
 
-At the top level, [`HOW_TO_GET_STARTED.md`](HOW_TO_GET_STARTED.md) provides the shortest implementation checklist. You'll also find detailed instructions for deploying or configuring the MolMIM and Boltz-2 NIM endpoints in [`deployment.md`](deployment.md), an HPC-focused Apptainer/Singularity workflow in [`singularity.md`](singularity.md), and all required dependencies in [`deployment-requirements.txt`](deployment-requirements.txt). Once the services are healthy, you can follow along with the Tutorials and Challenge. On ARM nodes, this branch runs Boltz-2 locally and uses a hosted MolMIM endpoint.
+At the top level, [`HOW_TO_GET_STARTED.md`](HOW_TO_GET_STARTED.md) provides the shortest implementation checklist. You'll also find detailed instructions for deploying or configuring the MolMIM and Boltz-2 NIM endpoints in [`deployment.md`](deployment.md), an HPC-focused Apptainer/Singularity workflow in [`singularity.md`](singularity.md), and all required dependencies in [`deployment-requirements.txt`](deployment-requirements.txt). Once the services are healthy, you can follow along with the Tutorials and Challenge. On ARM nodes, this branch uses hosted MolMIM, tries local Boltz-2, and falls back to hosted Boltz-2 when local prediction requests fail.
 
 ### 📚 Tutorials
 The [`tutorials/`](tutorials/) folder contains everything you need to get started and background on the models and techniques used in the Challenge:
@@ -75,8 +75,10 @@ jupyter-lab Start_Here.ipynb
 `bootstrap_bootcamp.sh` creates a local `.venv`, installs dependencies, starts
 the NIM services, waits for health checks, and writes `.openhackathon-nims.env`.
 The service wrapper is architecture-aware: x86_64/amd64 tries local MolMIM plus
-local Boltz-2 and falls back to hosted MolMIM if local MolMIM cannot become
-healthy; aarch64/arm64 uses hosted MolMIM plus local Boltz-2 by default.
+local Boltz-2 and falls back to hosted endpoints when local services do not pass
+their checks; aarch64/arm64 uses hosted MolMIM, then tries local Boltz-2 with a
+hosted Boltz-2 fallback. Boltz-2 readiness includes a small prediction smoke
+test, because `/v1/health/ready` alone can be true before worker GPUs are usable.
 
 For Docker-only GB200/GB300 ARM nodes, the same command works after selecting
 the Docker runtime:
