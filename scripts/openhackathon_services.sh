@@ -53,11 +53,12 @@ Defaults:
 
 MolMIM selection:
   auto       x86_64/amd64 tries local MolMIM first, then hosted fallback.
-             aarch64/arm64 uses hosted MolMIM by default.
+             aarch64/arm64 tries the local-arm MolMIM NIM first, then hosted fallback.
   local      require local MolMIM NIM (amd64 image; not available on ARM).
   local-arm  run local MolMIM on aarch64 (Grace/GB200/GB300) via a pure-PyTorch
              NIM-like service, with hosted fallback. Enables /hidden, /decode,
-             and CMA-ES guided optimization. Requires Docker + NGC_API_KEY.
+             and CMA-ES guided optimization. Builds/runs via Docker or
+             Apptainer/Singularity; requires NGC_API_KEY.
   hosted     use hosted MolMIM and do not launch local MolMIM.
   none       do not configure or launch MolMIM.
 
@@ -198,6 +199,28 @@ is_arm_arch() {
             ;;
         *)
             return 1
+            ;;
+    esac
+}
+
+# The ARM-local MolMIM service (--molmim local-arm) builds and runs via either
+# Docker or Apptainer/Singularity (see run_molmim_arm.sh), so it is the auto-mode
+# default on ARM whenever a container runtime is available. If none is usable,
+# auto mode falls back to hosted MolMIM.
+arm_local_molmim_supported() {
+    case "${OPENHACKATHON_CONTAINER_RUNTIME:-auto}" in
+        docker)
+            command -v "${DOCKER_BIN:-docker}" >/dev/null 2>&1
+            ;;
+        apptainer)
+            command -v "${APPTAINER_BIN:-apptainer}" >/dev/null 2>&1
+            ;;
+        singularity)
+            command -v "${APPTAINER_BIN:-singularity}" >/dev/null 2>&1
+            ;;
+        *)
+            command -v apptainer >/dev/null 2>&1 || command -v singularity >/dev/null 2>&1 || \
+                { command -v "${DOCKER_BIN:-docker}" >/dev/null 2>&1 && "${DOCKER_BIN:-docker}" ps >/dev/null 2>&1; }
             ;;
     esac
 }
@@ -455,7 +478,21 @@ cmd_start() {
             elif is_external_url "$requested_molmim_url"; then
                 start_molmim=0
                 external_molmim_url="$requested_molmim_url"
+            elif is_arm_arch && arm_local_molmim_supported; then
+                # ARM (GB200/GB300): default to the local pure-PyTorch MolMIM NIM
+                # (Docker or Apptainer/Singularity) so /hidden, /decode, and CMA-ES
+                # work out of the box. Falls back to hosted MolMIM if the local
+                # build/health check fails.
+                start_molmim=1
+                export OPENHACKATHON_MOLMIM_ARM=1
+                molmim_ready_timeout="${OPENHACKATHON_MOLMIM_READY_TIMEOUT:-2400}"
+                if is_external_url "$env_molmim_url"; then
+                    external_molmim_url="$env_molmim_url"
+                else
+                    external_molmim_url="$hosted_molmim_url"
+                fi
             elif is_arm_arch; then
+                # ARM with no usable container runtime: use hosted MolMIM.
                 start_molmim=0
                 if is_external_url "$env_molmim_url"; then
                     external_molmim_url="$env_molmim_url"

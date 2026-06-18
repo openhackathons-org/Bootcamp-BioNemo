@@ -1,0 +1,37 @@
+# Copyright (c) 2026, NVIDIA CORPORATION. Licensed under the Apache License, Version 2.0 (the "License") you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+#
+# Apptainer/Singularity build of the NIM-like MolMIM service for aarch64 +
+# Blackwell (GB200/GB300), for HPC clusters that use Apptainer instead of Docker.
+# It mirrors molmim_arm/Dockerfile: a stock NGC PyTorch base (arm64 + Blackwell
+# CUDA) running the pure-PyTorch MolMIM (molmim_torch.py) -- no NeMo / Megatron /
+# apex / TransformerEngine. The molmim_70m_24_3.nemo checkpoint is NOT baked in;
+# it is bind-mounted at /models at runtime.
+#
+# Build from the molmim_arm/ directory so the %files paths resolve, e.g.:
+#   cd molmim_arm
+#   apptainer build --build-arg BASE_IMAGE=nvcr.io/nvidia/pytorch:25.01-py3 \
+#       molmim-arm-nim.sif molmim_arm.def
+
+Bootstrap: docker
+From: {{ BASE_IMAGE }}
+
+%arguments
+    BASE_IMAGE=nvcr.io/nvidia/pytorch:25.01-py3
+
+%files
+    molmim_torch.py /opt/molmim-shim/molmim_torch.py
+    engine.py /opt/molmim-shim/engine.py
+    server.py /opt/molmim-shim/server.py
+
+%post
+    pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.27" "pydantic>=2,<3"
+
+%environment
+    export NIM_HTTP_API_PORT=8001
+    export MOLMIM_CHECKPOINT=/models/molmim_70m_24_3.nemo
+    export MOLMIM_DEVICE=cuda
+    export PYTHONPATH=/opt/molmim-shim:${PYTHONPATH:-}
+
+%runscript
+    cd /opt/molmim-shim
+    exec python server.py
