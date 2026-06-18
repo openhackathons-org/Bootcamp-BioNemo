@@ -49,8 +49,9 @@ Environment:
 
 Architecture behavior:
   x86_64/amd64: start local MolMIM plus local Boltz-2; fall back to hosted endpoints.
-  aarch64/arm64: use hosted MolMIM, try local Boltz-2, then fall back to hosted Boltz-2.
-                 Pass --molmim local-arm to run local MolMIM on ARM (enables CMA-ES).
+  aarch64/arm64: start the local-arm MolMIM NIM (enables /hidden, /decode, CMA-ES)
+                 with hosted MolMIM fallback; try local Boltz-2, then fall back to
+                 hosted Boltz-2. Pass --molmim hosted to skip the local MolMIM build.
 EOF
 }
 

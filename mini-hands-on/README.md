@@ -31,10 +31,10 @@ scripts/openhackathon_services.sh status
 The bootstrap script installs dependencies, starts services, and writes
 `.openhackathon-nims.env`. It chooses the MolMIM strategy by architecture:
 x86_64/amd64 tries local MolMIM with hosted fallback, while aarch64/arm64
-defaults to hosted MolMIM and tries local Boltz-2 with hosted Boltz-2 fallback.
-On ARM you can run local MolMIM with `--molmim local-arm` (a pure-PyTorch MolMIM
-NIM that enables CMA-ES). On Docker-only ARM nodes, set the runtime and use the
-same command:
+defaults to the local-arm MolMIM NIM (pure-PyTorch, built and run via Docker or
+Apptainer/Singularity, enabling CMA-ES) with hosted MolMIM fallback, and tries
+local Boltz-2 with hosted Boltz-2 fallback. On Docker ARM nodes, set the runtime
+and use the same command:
 
 ```bash
 export NGC_API_KEY=<PASTE_API_KEY_HERE>

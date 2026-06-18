@@ -28,10 +28,12 @@ The bootcamp notebooks expect BioNeMo NIM endpoints:
 - Boltz-2 NIM for protein-ligand affinity prediction.
 
 On x86 GPU clusters, both services can be self-hosted. On GB200, GB300, and
-other ARM64 nodes, you can run local MolMIM with `--molmim local-arm` (a
-pure-PyTorch MolMIM NIM that exposes `/hidden` and `/decode`) or use a
-NVIDIA-hosted/x86-hosted MolMIM endpoint; either way, try local Boltz-2 with a
-hosted Boltz-2 fallback if prediction requests do not complete.
+other ARM64 nodes, the wrapper defaults to a local pure-PyTorch MolMIM NIM
+(`--molmim local-arm`, exposing `/hidden` and `/decode`) built and run via Docker
+or Apptainer/Singularity, with hosted MolMIM fallback; pass `--molmim hosted` to
+use a NVIDIA-hosted/x86-hosted MolMIM endpoint instead. Either way, it tries
+local Boltz-2 with a hosted Boltz-2 fallback if prediction requests do not
+complete.
 
 The service wrapper starts these services and writes endpoint values to `.openhackathon-nims.env`:
 
@@ -106,10 +108,11 @@ The launch path is architecture-aware:
 
 - `x86_64`/`amd64`: try local MolMIM plus local Boltz-2, then fall back to
   hosted endpoints if local services do not pass their checks.
-- `aarch64`/`arm64`: default to hosted MolMIM, try local Boltz-2, then fall back
-  to hosted Boltz-2 if local prediction requests hang or fail. Pass
-  `--molmim local-arm` to run local MolMIM on ARM (enables `/hidden`, `/decode`,
-  and CMA-ES).
+- `aarch64`/`arm64`: default to the local-arm MolMIM NIM (built/run via Docker or
+  Apptainer/Singularity; enables `/hidden`, `/decode`, and CMA-ES) with hosted
+  MolMIM fallback; try local Boltz-2, then fall back to hosted Boltz-2 if local
+  prediction requests hang or fail. Pass `--molmim hosted` to skip the local
+  MolMIM build. If no container runtime is available, auto mode uses hosted MolMIM.
 
 For Docker-only GB200/GB300 ARM nodes, set the runtime and run the same
 bootstrap command:
@@ -117,14 +120,16 @@ bootstrap command:
 ```bash
 export NGC_API_KEY=<your-ngc-key>
 export OPENHACKATHON_CONTAINER_RUNTIME=docker
-scripts/bootstrap_bootcamp.sh --molmim local-arm --boltz2 1
+scripts/bootstrap_bootcamp.sh --boltz2 1
 ```
 
 The Docker launcher selects `linux/arm64` automatically on `aarch64` hosts and
-checks that the image tag advertises that platform before pulling. The
-`--molmim local-arm` option builds and runs a pure-PyTorch MolMIM NIM (see
-[`deployment.md`](deployment.md)); omit it to use hosted MolMIM (generation
-only). Boltz-2 `1.7.0` is the default ARM-capable tag for current local testing. On ARM hosts
+checks that the image tag advertises that platform before pulling. On ARM, auto
+mode builds and runs the pure-PyTorch MolMIM NIM by default (via Docker here, or
+Apptainer/Singularity on HPC clusters; see [`deployment.md`](deployment.md) and
+[`singularity.md`](singularity.md)); pass `--molmim hosted` to use hosted MolMIM
+(generation only). Boltz-2 `1.7.0` is the default ARM-capable tag for current
+local testing. On ARM hosts
 with a pre-590 NVIDIA driver, the launcher defaults Boltz-2 to
 `nvcr.io/nim/mit/boltz2:1.4.0`. The launching user
 must be able to run
