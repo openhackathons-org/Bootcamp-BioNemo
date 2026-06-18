@@ -304,11 +304,22 @@ fi
 export NGC_API_KEY
 export NGC_CLI_API_KEY="${NGC_CLI_API_KEY:-$NGC_API_KEY}"
 
+# In `--gpus device=<gpu_id>` mode the single exposed GPU is remapped to index 0
+# inside the container, so the in-container CUDA_VISIBLE_DEVICES must be 0 -- NOT
+# the host gpu_id (which would point at a non-existent device and yield
+# "No CUDA GPUs are available" for gpu_id>0). In `all` mode every GPU is visible,
+# so gpu_id selects the right one.
+if [ "${OPENHACKATHON_DOCKER_GPU_MODE:-device}" = "all" ]; then
+    container_cuda_visible="$gpu_id"
+else
+    container_cuda_visible=0
+fi
+
 env_args=(
     -e NGC_API_KEY
     -e NGC_CLI_API_KEY
     -e "NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-$gpu_id}"
-    -e "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-$gpu_id}"
+    -e "CUDA_VISIBLE_DEVICES=$container_cuda_visible"
     -e "NIM_CACHE_PATH=/opt/nim/.cache"
     -e "NIM_HTTP_API_PORT=$port"
 )

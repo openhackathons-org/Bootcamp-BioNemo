@@ -35,7 +35,7 @@ reserved_ports=()
 usage() {
     cat <<'EOF'
 Usage:
-  scripts/openhackathon_services.sh start [--boltz2 N] [--boltz2-mode auto|local|hosted|none] [--boltz2-url URL] [--molmim auto|local|hosted|none] [--molmim-url URL]
+  scripts/openhackathon_services.sh start [--boltz2 N] [--boltz2-mode auto|local|hosted|none] [--boltz2-url URL] [--molmim auto|local|local-arm|hosted|none] [--molmim-url URL]
   scripts/openhackathon_services.sh stop
   scripts/openhackathon_services.sh status
   scripts/openhackathon_services.sh env
@@ -52,11 +52,14 @@ Defaults:
   Boltz-2 extra: starts at http://localhost:8010
 
 MolMIM selection:
-  auto    x86_64/amd64 tries local MolMIM first, then hosted fallback.
-          aarch64/arm64 uses hosted MolMIM by default.
-  local   require local MolMIM NIM.
-  hosted  use hosted MolMIM and do not launch local MolMIM.
-  none    do not configure or launch MolMIM.
+  auto       x86_64/amd64 tries local MolMIM first, then hosted fallback.
+             aarch64/arm64 uses hosted MolMIM by default.
+  local      require local MolMIM NIM (amd64 image; not available on ARM).
+  local-arm  run local MolMIM on aarch64 (Grace/GB200/GB300) via a pure-PyTorch
+             NIM-like service, with hosted fallback. Enables /hidden, /decode,
+             and CMA-ES guided optimization. Requires Docker + NGC_API_KEY.
+  hosted     use hosted MolMIM and do not launch local MolMIM.
+  none       do not configure or launch MolMIM.
 
 Boltz-2 selection:
   auto    try local Boltz-2 first, then hosted fallback if the prediction smoke test fails.
@@ -71,8 +74,9 @@ Environment overrides:
   OPENHACKATHON_CONTAINER_RUNTIME=auto|apptainer|singularity|docker
   OPENHACKATHON_DOCKER_GPU_MODE=device|all
   OPENHACKATHON_DOCKER_USE_NVIDIA_RUNTIME=0|1
-  OPENHACKATHON_MOLMIM_MODE=auto|local|hosted|none
+  OPENHACKATHON_MOLMIM_MODE=auto|local|local-arm|hosted|none
   OPENHACKATHON_BOLTZ2_MODE=auto|local|hosted|none
+  BIONEMO_PYTORCH_BASE, MOLMIM_ARM_IMAGE, MOLMIM_WEIGHTS_DIR (for --molmim local-arm)
   OPENHACKATHON_HOSTED_MOLMIM_URL=https://health.api.nvidia.com/v1/biology/nvidia/molmim
   OPENHACKATHON_HOSTED_BOLTZ2_URL=https://health.api.nvidia.com/v1/biology/mit/boltz2
   OPENHACKATHON_WAIT_FOR_READY=0 to return immediately after launching
@@ -308,10 +312,10 @@ run_boltz2_smoke_test() {
 
 validate_molmim_mode() {
     case "$molmim_mode" in
-        auto|local|hosted|none)
+        auto|local|local-arm|hosted|none)
             ;;
         *)
-            echo "Error: MolMIM mode must be auto, local, hosted, or none." >&2
+            echo "Error: MolMIM mode must be auto, local, local-arm, hosted, or none." >&2
             exit 1
             ;;
     esac
@@ -471,6 +475,21 @@ cmd_start() {
             start_molmim=1
             external_molmim_url="${molmim_url_override:-${requested_molmim_url:-$hosted_molmim_url}}"
             ;;
+        local-arm)
+            # Local MolMIM on aarch64 via the pure-PyTorch NIM-like service
+            # (molmim_arm/; no prebuilt NIM image required).
+            start_molmim=1
+            export OPENHACKATHON_MOLMIM_ARM=1
+            # First launch builds the molmim_arm image and downloads the
+            # checkpoint, so allow a longer readiness window unless the user set
+            # one explicitly.
+            molmim_ready_timeout="${OPENHACKATHON_MOLMIM_READY_TIMEOUT:-2400}"
+            if ! is_arm_arch; then
+                echo "Warning: --molmim local-arm selected on non-ARM host ($detected_arch)." >&2
+                echo "         Set DOCKER_PLATFORM/BIONEMO_PYTORCH_BASE appropriately if this is intentional." >&2
+            fi
+            external_molmim_url="${molmim_url_override:-${requested_molmim_url:-$hosted_molmim_url}}"
+            ;;
         hosted)
             start_molmim=0
             if [ -n "$molmim_url_override" ]; then
@@ -552,7 +571,9 @@ cmd_start() {
     fi
 
     echo "Detected architecture: $detected_arch"
-    if [ "$start_molmim" -eq 1 ]; then
+    if [ "$start_molmim" -eq 1 ] && [ "${OPENHACKATHON_MOLMIM_ARM:-0}" = "1" ]; then
+        echo "MolMIM mode: local-arm (pure-PyTorch NIM-like service) with hosted fallback ($external_molmim_url)"
+    elif [ "$start_molmim" -eq 1 ]; then
         echo "MolMIM mode: local with hosted fallback ($external_molmim_url)"
     elif [ -n "$external_molmim_url" ]; then
         echo "MolMIM mode: hosted/external ($external_molmim_url)"
@@ -584,10 +605,11 @@ cmd_start() {
         reserved_ports+=("$molmim_port")
         start_service "molmim" "molmim" "$molmim_port" 0
         if ! wait_until_ready "molmim" "http://localhost:$molmim_port" "$molmim_ready_timeout" "molmim"; then
-            if [ "$molmim_mode" = "auto" ] && [ -n "$external_molmim_url" ]; then
+            if { [ "$molmim_mode" = "auto" ] || [ "$molmim_mode" = "local-arm" ]; } && [ -n "$external_molmim_url" ]; then
                 echo "Local MolMIM did not become healthy; falling back to hosted/external MolMIM."
                 stop_service_by_name "molmim"
                 start_molmim=0
+                unset OPENHACKATHON_MOLMIM_ARM
             else
                 echo "Error: local MolMIM did not become ready." >&2
                 exit 1
@@ -765,7 +787,7 @@ cmd_env() {
             start_molmim=0
             external_molmim_url="${molmim_url_override:-}"
             ;;
-        local)
+        local|local-arm)
             start_molmim=1
             ;;
         auto)

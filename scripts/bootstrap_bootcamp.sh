@@ -30,7 +30,9 @@ Options:
   --boltz2 N              Number of local Boltz-2 endpoints to launch. Default: 1.
   --boltz2-mode MODE      auto, local, hosted, or none. Default: auto.
   --boltz2-url URL        Hosted/external Boltz-2 URL.
-  --molmim MODE          auto, local, hosted, or none. Default: auto.
+  --molmim MODE          auto, local, local-arm, hosted, or none. Default: auto.
+                         local-arm runs local MolMIM on aarch64 (Grace/GB200/
+                         GB300) via a pure-PyTorch NIM-like service (enables CMA-ES).
   --molmim-url URL       Hosted/external MolMIM URL.
   --container-runtime R  auto, apptainer, singularity, or docker.
   --skip-python          Do not create/install the Python virtual environment.
@@ -48,6 +50,7 @@ Environment:
 Architecture behavior:
   x86_64/amd64: start local MolMIM plus local Boltz-2; fall back to hosted endpoints.
   aarch64/arm64: use hosted MolMIM, try local Boltz-2, then fall back to hosted Boltz-2.
+                 Pass --molmim local-arm to run local MolMIM on ARM (enables CMA-ES).
 EOF
 }
 
