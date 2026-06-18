@@ -67,26 +67,29 @@ The MolMIM `nvcr.io/nim/nvidia/molmim:1.0.0` image currently resolves as
 `linux/amd64`, so it is not a native ARM container for these nodes. There are
 two ways to get MolMIM on ARM:
 
-1. **Hosted MolMIM (default on ARM).** Use a NVIDIA-hosted MolMIM endpoint or
-   another x86-hosted MolMIM endpoint and set `MOLMIM_URL` to that service. If
-   the endpoint requires authentication, set `MOLMIM_API_KEY` or
-   `NVIDIA_API_KEY`; the notebooks and shared client add the bearer token
-   automatically. For NVIDIA-hosted MolMIM, use
-   `https://health.api.nvidia.com/v1/biology/nvidia/molmim` as the base URL. The
-   hosted endpoint supports molecule generation only — it does not expose the
-   latent-space `/hidden` and `/decode` endpoints that CMA-ES guided
-   optimization needs. Override `MOLMIM_IMAGE` only if NVIDIA publishes an ARM64
-   MolMIM NIM tag.
-
-2. **Local MolMIM on ARM via a pure-PyTorch NIM-like service (`--molmim local-arm`).**
+1. **Local MolMIM on ARM via a pure-PyTorch NIM-like service (`--molmim local-arm`, the default on ARM with a container runtime).**
    The bootcamp ships a pure-PyTorch MolMIM (loading the official
    `molmim_70m_24_3` weights) wrapped in a FastAPI service that implements the
    MolMIM NIM REST contract — `/hidden`, `/decode`, `/sampling`, `/generate` —
-   and runs natively on aarch64 + Blackwell with no NeMo/Megatron/apex/TE. This
-   re-enables CMA-ES guided optimization on GB200/GB300 where the amd64-only NIM
-   cannot run. See
+   and runs natively on aarch64 + Blackwell with no NeMo/Megatron/apex/TE. It
+   builds and runs via **either Docker or Apptainer/Singularity**, so on ARM
+   hosts with a container runtime this is the auto-mode default and enables CMA-ES
+   guided optimization out of the box where the amd64-only NIM cannot run. See
    [ARM-Local MolMIM (pure-PyTorch NIM-like service)](#arm-local-molmim-pure-pytorch-nim-like-service)
    below.
+
+2. **Hosted MolMIM (fallback / generation-only).** Use a NVIDIA-hosted MolMIM
+   endpoint or another x86-hosted MolMIM endpoint and set `MOLMIM_URL` to that
+   service (or pass `--molmim hosted`). The wrapper also uses this automatically
+   if the local-arm build/health check fails, and it is the auto-mode default if
+   no container runtime is available. If the endpoint requires authentication,
+   set `MOLMIM_API_KEY` or `NVIDIA_API_KEY`; the notebooks and shared client add
+   the bearer token automatically. For NVIDIA-hosted MolMIM, use
+   `https://health.api.nvidia.com/v1/biology/nvidia/molmim` as the base URL.
+   The hosted endpoint supports molecule generation only — it does not expose the
+   latent-space `/hidden` and `/decode` endpoints that CMA-ES guided
+   optimization needs. Override `MOLMIM_IMAGE` only if NVIDIA publishes an ARM64
+   MolMIM NIM tag.
 
 For NVIDIA-hosted Boltz-2 fallback, the default endpoint root is
 `https://health.api.nvidia.com/v1/biology/mit/boltz2`. Override it with
@@ -113,9 +116,12 @@ scripts/openhackathon_services.sh status
 
 `scripts/openhackathon_services.sh start --boltz2 1` can still be used when
 Python dependencies are already installed. Its default `--molmim auto` mode
-uses local MolMIM on x86_64/amd64 with hosted fallback, and hosted MolMIM on
-aarch64/arm64. To run MolMIM locally on aarch64 (including latent `/hidden` and
-CMA-ES), use `--molmim local-arm` (see
+uses local MolMIM on x86_64/amd64 with hosted fallback; on aarch64/arm64 with a
+container runtime (Docker or Apptainer/Singularity) it defaults to the local-arm
+MolMIM NIM (latent `/hidden`, `/decode`, and CMA-ES) with hosted fallback, and
+falls back to hosted MolMIM only when no container runtime is available. Use
+`--molmim local-arm` to force the local ARM build, or `--molmim hosted` to force
+hosted (see
 [ARM-Local MolMIM (pure-PyTorch NIM-like service)](#arm-local-molmim-pure-pytorch-nim-like-service)).
 Its default `--boltz2-mode auto` mode starts local Boltz-2, then falls back to
 hosted Boltz-2 if the prediction smoke test fails.
@@ -199,37 +205,46 @@ client and CMA-ES guided optimization run unmodified against `MOLMIM_URL`.
 Validated on a GB200: 9/10 exact drug-like reconstruction and 100% valid,
 on-target latent sampling.
 
-Enable it with the `local-arm` MolMIM mode:
+It is the auto-mode default on ARM with a container runtime, and you can also
+select it explicitly. It builds and runs via either Docker or
+Apptainer/Singularity:
 
 ```bash
 export NGC_API_KEY=<PASTE_API_KEY_HERE>
+# Docker workstation:
 export OPENHACKATHON_CONTAINER_RUNTIME=docker
+# or, on an Apptainer/Singularity HPC cluster:
+# export OPENHACKATHON_CONTAINER_RUNTIME=apptainer
 
 scripts/openhackathon_services.sh start --molmim local-arm --boltz2 1
 source .openhackathon-nims.env
 scripts/openhackathon_services.sh status
 ```
 
-The first launch builds the image from `molmim_arm/Dockerfile` (on a stock NGC
-PyTorch base, `nvcr.io/nvidia/pytorch:25.01-py3`, which provides arm64 +
-Blackwell), and downloads the `molmim_70m_24_3` weights from NGC
-(`nvidia/clara/molmim:1.3`) into the weights cache, so allow extra time before
-the endpoint reports ready (`OPENHACKATHON_MOLMIM_READY_TIMEOUT` defaults to
-2400s in this mode). The generated `.openhackathon-nims.env` sets
-`OPENHACKATHON_ACTIVE_MOLMIM_MODE=local` and `OPENHACKATHON_USE_CMA=1`, which
-re-enables the guided-optimization notebook section. If the local ARM MolMIM
-does not become healthy, the wrapper falls back to the hosted MolMIM endpoint
-(generation only).
+The first launch builds the image (Docker: `molmim_arm/Dockerfile`; Apptainer:
+a `.sif` from `molmim_arm/molmim_arm.def`) on a stock NGC PyTorch base
+(`nvcr.io/nvidia/pytorch:25.01-py3`, which provides arm64 + Blackwell), and
+downloads the `molmim_70m_24_3` weights from NGC (`nvidia/clara/molmim:1.3`)
+into the weights cache, so allow extra time before the endpoint reports ready
+(`OPENHACKATHON_MOLMIM_READY_TIMEOUT` defaults to 2400s in this mode). The
+weights are mounted at `/models` at runtime (not baked into the image). The
+generated `.openhackathon-nims.env` sets `OPENHACKATHON_ACTIVE_MOLMIM_MODE=local`
+and `OPENHACKATHON_USE_CMA=1`, which re-enables the guided-optimization notebook
+section. If the local ARM MolMIM does not become healthy, the wrapper falls back
+to the hosted MolMIM endpoint (generation only).
 
 Relevant overrides:
 
 ```bash
 export BIONEMO_PYTORCH_BASE=nvcr.io/nvidia/pytorch:25.01-py3  # arm64 + Blackwell base
-export MOLMIM_ARM_IMAGE=molmim-arm-nim:local                 # built tag
+export MOLMIM_ARM_IMAGE=molmim-arm-nim:local                 # Docker built tag
+export MOLMIM_ARM_SIF=$PWD/.sif/molmim-arm-nim.sif           # Apptainer .sif path
+export SIF_DIR=$PWD/.sif                                     # Apptainer .sif directory
 export MOLMIM_WEIGHTS_DIR=$HOME/.cache/nim/molmim            # holds molmim_70m_24_3.nemo
 export MOLMIM_NGC_MODEL=nvidia/clara/molmim:1.3              # weights source
 export MOLMIM_ARM_REBUILD=1                                  # force a rebuild
 export MOLMIM_SAMPLING_METHOD=greedy                         # greedy|topkp for /sampling
+export APPTAINER_GPU_MODE=auto                               # auto|nvccli|nv (Apptainer GPU)
 ```
 
 You can also run it directly for debugging, then browse `http://localhost:8001/docs`:

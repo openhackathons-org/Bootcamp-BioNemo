@@ -16,13 +16,13 @@ runtime. The Docker launcher checks requested image tags for native platform
 support before pulling; Boltz-2 `1.7.0` is the current default local image and
 MolMIM `1.0.0` is not a native ARM container. ARM hosts that still run a
 pre-590 driver default to Boltz-2 `1.4.0` unless `BOLTZ2_IMAGE` is set. For ARM
-deployments, either run local MolMIM with the Docker-based `--molmim local-arm`
-path in [`deployment.md`](deployment.md) (a pure-PyTorch MolMIM NIM that exposes
-`/hidden` and `/decode`; it is a Docker image and not part of the
-Apptainer/Singularity flow), or use a NVIDIA-hosted or x86-hosted MolMIM endpoint
-by setting `MOLMIM_URL` plus `MOLMIM_API_KEY` or `NVIDIA_API_KEY` when
-authentication is required. The wrapper tries local Boltz-2 and then falls back
-to hosted Boltz-2 if a prediction smoke test fails.
+deployments, the `--molmim local-arm` MolMIM NIM is the auto-mode default and
+builds a `.sif` from `molmim_arm/molmim_arm.def` via Apptainer/Singularity (a
+pure-PyTorch MolMIM that exposes `/hidden` and `/decode`, enabling CMA-ES). To
+use hosted MolMIM instead, pass `--molmim hosted` and set `MOLMIM_URL` plus
+`MOLMIM_API_KEY` or `NVIDIA_API_KEY` when authentication is required. The wrapper
+tries local Boltz-2 and then falls back to hosted Boltz-2 if a prediction smoke
+test fails.
 
 The Docker commands in NVIDIA NIM documentation map host ports with `-p`.
 Apptainer normally shares the host network namespace, so these scripts set
@@ -149,8 +149,10 @@ By default, `--molmim auto` uses hosted MolMIM on aarch64/arm64 and local
 MolMIM with hosted fallback on x86_64/amd64. The NVIDIA-hosted MolMIM endpoint
 supports molecule generation. Workflows that need MolMIM latent `/hidden` and
 `/decode` endpoints for CMA-ES should use a local or x86-hosted MolMIM NIM. On
-ARM (GB200/GB300), `--molmim local-arm` provides a local MolMIM NIM (Docker; see
-[`deployment.md`](deployment.md)) that exposes `/hidden` and `/decode`.
+ARM (GB200/GB300), `--molmim local-arm` (the auto-mode default) provides a local
+MolMIM NIM that builds a `.sif` via Apptainer/Singularity (or an image via
+Docker; see [`deployment.md`](deployment.md)) and exposes `/hidden` and
+`/decode`.
 
 By default, `--boltz2-mode auto` launches local Boltz-2 and checks both
 `/v1/health/ready` and a tiny prediction request. If local Boltz-2 reports ready
