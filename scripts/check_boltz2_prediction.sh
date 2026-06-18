@@ -45,7 +45,7 @@ payload='{
     }
   ],
   "recycling_steps": 1,
-  "sampling_steps": 5,
+  "sampling_steps": 10,
   "diffusion_samples": 1,
   "step_scale": 1.638,
   "output_format": "mmcif"

@@ -64,15 +64,29 @@ test fails in `auto` mode, `.openhackathon-nims.env` is written with the hosted
 Boltz-2 fallback URL instead of a local endpoint that may hang.
 
 The MolMIM `nvcr.io/nim/nvidia/molmim:1.0.0` image currently resolves as
-`linux/amd64`, so it is not a native ARM container for these nodes. For ARM
-deployments, use a NVIDIA-hosted MolMIM endpoint or another x86-hosted MolMIM
-endpoint and set `MOLMIM_URL` to that service. If the endpoint requires
-authentication, set `MOLMIM_API_KEY` or `NVIDIA_API_KEY`; the notebooks and
-shared client add the bearer token automatically. For NVIDIA-hosted MolMIM, use
-`https://health.api.nvidia.com/v1/biology/nvidia/molmim` as the base URL. The
-hosted endpoint supports molecule generation; local MolMIM NIMs are still
-needed for latent-space `/hidden` and `/decode` CMA-ES workflows. Override
-`MOLMIM_IMAGE` only if NVIDIA publishes an ARM64 MolMIM tag.
+`linux/amd64`, so it is not a native ARM container for these nodes. There are
+two ways to get MolMIM on ARM:
+
+1. **Hosted MolMIM (default on ARM).** Use a NVIDIA-hosted MolMIM endpoint or
+   another x86-hosted MolMIM endpoint and set `MOLMIM_URL` to that service. If
+   the endpoint requires authentication, set `MOLMIM_API_KEY` or
+   `NVIDIA_API_KEY`; the notebooks and shared client add the bearer token
+   automatically. For NVIDIA-hosted MolMIM, use
+   `https://health.api.nvidia.com/v1/biology/nvidia/molmim` as the base URL. The
+   hosted endpoint supports molecule generation only — it does not expose the
+   latent-space `/hidden` and `/decode` endpoints that CMA-ES guided
+   optimization needs. Override `MOLMIM_IMAGE` only if NVIDIA publishes an ARM64
+   MolMIM NIM tag.
+
+2. **Local MolMIM on ARM via a pure-PyTorch NIM-like service (`--molmim local-arm`).**
+   The bootcamp ships a pure-PyTorch MolMIM (loading the official
+   `molmim_70m_24_3` weights) wrapped in a FastAPI service that implements the
+   MolMIM NIM REST contract — `/hidden`, `/decode`, `/sampling`, `/generate` —
+   and runs natively on aarch64 + Blackwell with no NeMo/Megatron/apex/TE. This
+   re-enables CMA-ES guided optimization on GB200/GB300 where the amd64-only NIM
+   cannot run. See
+   [ARM-Local MolMIM (pure-PyTorch NIM-like service)](#arm-local-molmim-pure-pytorch-nim-like-service)
+   below.
 
 For NVIDIA-hosted Boltz-2 fallback, the default endpoint root is
 `https://health.api.nvidia.com/v1/biology/mit/boltz2`. Override it with
@@ -100,8 +114,11 @@ scripts/openhackathon_services.sh status
 `scripts/openhackathon_services.sh start --boltz2 1` can still be used when
 Python dependencies are already installed. Its default `--molmim auto` mode
 uses local MolMIM on x86_64/amd64 with hosted fallback, and hosted MolMIM on
-aarch64/arm64. Its default `--boltz2-mode auto` mode starts local Boltz-2, then
-falls back to hosted Boltz-2 if the prediction smoke test fails.
+aarch64/arm64. To run MolMIM locally on aarch64 (including latent `/hidden` and
+CMA-ES), use `--molmim local-arm` (see
+[ARM-Local MolMIM (pure-PyTorch NIM-like service)](#arm-local-molmim-pure-pytorch-nim-like-service)).
+Its default `--boltz2-mode auto` mode starts local Boltz-2, then falls back to
+hosted Boltz-2 if the prediction smoke test fails.
 
 If you need to force a platform or image tag for validation, set:
 
@@ -160,6 +177,66 @@ docker run --rm -it --name boltz2 --gpus device=0 \
      -v "$LOCAL_NIM_CACHE:/opt/nim/.cache" \
      -p 8000:8000 \
      nvcr.io/nim/mit/boltz2:1.7.0
+```
+
+### ARM-Local MolMIM (pure-PyTorch NIM-like service)
+
+On GB200/GB300 (aarch64 + Blackwell) there is **no** MolMIM that runs as a
+prebuilt container: the MolMIM NIM is amd64-only, the arm64 BioNeMo Framework
+images (`2.x-arm`) do not contain MolMIM, and the only MolMIM-bearing framework
+(v1) is pinned to a pre-Blackwell CUDA 12.3 stack that won't execute on these
+GPUs.
+
+To make MolMIM work anyway, the bootcamp ships `molmim_arm/`, a small
+**pure-PyTorch reimplementation** (`molmim_torch.py`) that loads the official
+`molmim_70m_24_3` checkpoint and runs entirely on stock PyTorch (no NeMo /
+Megatron / apex / TransformerEngine), so it runs natively on aarch64 + Blackwell.
+It is wrapped in a **FastAPI service** (`server.py`) that mirrors the MolMIM NIM
+REST surface — `/hidden`, `/decode`, `/sampling`, `/generate`,
+`/v1/health/ready`, `/v1/metadata`, and OpenAPI docs at `/docs` — so the bootcamp
+client and CMA-ES guided optimization run unmodified against `MOLMIM_URL`.
+
+Validated on a GB200: 9/10 exact drug-like reconstruction and 100% valid,
+on-target latent sampling.
+
+Enable it with the `local-arm` MolMIM mode:
+
+```bash
+export NGC_API_KEY=<PASTE_API_KEY_HERE>
+export OPENHACKATHON_CONTAINER_RUNTIME=docker
+
+scripts/openhackathon_services.sh start --molmim local-arm --boltz2 1
+source .openhackathon-nims.env
+scripts/openhackathon_services.sh status
+```
+
+The first launch builds the image from `molmim_arm/Dockerfile` (on a stock NGC
+PyTorch base, `nvcr.io/nvidia/pytorch:25.01-py3`, which provides arm64 +
+Blackwell), and downloads the `molmim_70m_24_3` weights from NGC
+(`nvidia/clara/molmim:1.3`) into the weights cache, so allow extra time before
+the endpoint reports ready (`OPENHACKATHON_MOLMIM_READY_TIMEOUT` defaults to
+2400s in this mode). The generated `.openhackathon-nims.env` sets
+`OPENHACKATHON_ACTIVE_MOLMIM_MODE=local` and `OPENHACKATHON_USE_CMA=1`, which
+re-enables the guided-optimization notebook section. If the local ARM MolMIM
+does not become healthy, the wrapper falls back to the hosted MolMIM endpoint
+(generation only).
+
+Relevant overrides:
+
+```bash
+export BIONEMO_PYTORCH_BASE=nvcr.io/nvidia/pytorch:25.01-py3  # arm64 + Blackwell base
+export MOLMIM_ARM_IMAGE=molmim-arm-nim:local                 # built tag
+export MOLMIM_WEIGHTS_DIR=$HOME/.cache/nim/molmim            # holds molmim_70m_24_3.nemo
+export MOLMIM_NGC_MODEL=nvidia/clara/molmim:1.3              # weights source
+export MOLMIM_ARM_REBUILD=1                                  # force a rebuild
+export MOLMIM_SAMPLING_METHOD=greedy                         # greedy|topkp for /sampling
+```
+
+You can also run it directly for debugging, then browse `http://localhost:8001/docs`:
+
+```bash
+export NGC_API_KEY=<PASTE_API_KEY_HERE>
+scripts/run_molmim_arm.sh molmim 8001 0
 ```
 
 ### ARM CUDA Readiness Check

@@ -25,6 +25,12 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     exit 0
 fi
 
+# MolMIM has no aarch64 NIM image. When the ARM-local path is selected, route
+# MolMIM to the pure-PyTorch NIM-like runner regardless of container runtime.
+if [ "${1:-}" = "molmim" ] && [ "${OPENHACKATHON_MOLMIM_ARM:-0}" = "1" ]; then
+    exec "$repo_root/scripts/run_molmim_arm.sh" "$@"
+fi
+
 runtime="${OPENHACKATHON_CONTAINER_RUNTIME:-auto}"
 
 case "$runtime" in
