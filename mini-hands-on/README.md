@@ -30,14 +30,16 @@ scripts/openhackathon_services.sh status
 
 The bootstrap script installs dependencies, starts services, and writes
 `.openhackathon-nims.env`. It chooses the MolMIM strategy by architecture:
-x86_64/amd64 tries local MolMIM with hosted fallback, while aarch64/arm64 uses
-hosted MolMIM and tries local Boltz-2 with hosted Boltz-2 fallback. On
-Docker-only ARM nodes, set the runtime and use the same command:
+x86_64/amd64 tries local MolMIM with hosted fallback, while aarch64/arm64
+defaults to hosted MolMIM and tries local Boltz-2 with hosted Boltz-2 fallback.
+On ARM you can run local MolMIM with `--molmim local-arm` (a pure-PyTorch MolMIM
+NIM that enables CMA-ES). On Docker-only ARM nodes, set the runtime and use the
+same command:
 
 ```bash
 export NGC_API_KEY=<PASTE_API_KEY_HERE>
 export OPENHACKATHON_CONTAINER_RUNTIME=docker
-scripts/bootstrap_bootcamp.sh --boltz2 1
+scripts/bootstrap_bootcamp.sh --molmim local-arm --boltz2 1
 source .openhackathon-nims.env
 ```
 
@@ -46,7 +48,8 @@ hands-on CDK design and Boltz-2 validation notebooks default to demo mode so
 they complete in a workshop-friendly amount of time. Set
 `OPENHACKATHON_DEMO_MODE=0` for a larger run.
 Hosted MolMIM uses generation/sampling; latent-space CMA-ES cells require a
-local or x86-hosted MolMIM NIM.
+local or x86-hosted MolMIM NIM. On ARM, `--molmim local-arm` provides that local
+MolMIM NIM (exposes `/hidden` and `/decode`).
 
 The large scoring cache and ReaSyn MCP server are not duplicated here. The
 mini track uses the repository-level `scoring/`, `data/`, and `cdk_oracle/`

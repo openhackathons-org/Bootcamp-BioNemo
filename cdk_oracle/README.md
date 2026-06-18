@@ -88,7 +88,9 @@ For NVIDIA-hosted fallback, use `https://health.api.nvidia.com/v1/biology/nvidia
 for MolMIM and `https://health.api.nvidia.com/v1/biology/mit/boltz2` for
 Boltz-2. Hosted MolMIM supports generation but not latent `/hidden` or
 `/decode`, so the pipeline automatically uses sampling instead of CMA-ES in
-that mode.
+that mode. On ARM (GB200/GB300), point `MOLMIM_URL` at the local `--molmim
+local-arm` NIM (`http://localhost:8001`, a pure-PyTorch MolMIM that exposes
+`/hidden` and `/decode`) to run full CMA-ES optimization.
 
 **Option 2: Constructor Arguments**
 ```python

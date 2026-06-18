@@ -11,7 +11,7 @@ This bootcamp combines comprehensive tutorials with a cutting-edge hackathon cha
 
 ## Repository Structure
 
-At the top level, [`HOW_TO_GET_STARTED.md`](HOW_TO_GET_STARTED.md) provides the shortest implementation checklist. You'll also find detailed instructions for deploying or configuring the MolMIM and Boltz-2 NIM endpoints in [`deployment.md`](deployment.md), an HPC-focused Apptainer/Singularity workflow in [`singularity.md`](singularity.md), and all required dependencies in [`deployment-requirements.txt`](deployment-requirements.txt). Once the services are healthy, you can follow along with the Tutorials and Challenge. On ARM nodes, this branch uses hosted MolMIM, tries local Boltz-2, and falls back to hosted Boltz-2 when local prediction requests fail.
+At the top level, [`HOW_TO_GET_STARTED.md`](HOW_TO_GET_STARTED.md) provides the shortest implementation checklist. You'll also find detailed instructions for deploying or configuring the MolMIM and Boltz-2 NIM endpoints in [`deployment.md`](deployment.md), an HPC-focused Apptainer/Singularity workflow in [`singularity.md`](singularity.md), and all required dependencies in [`deployment-requirements.txt`](deployment-requirements.txt). Once the services are healthy, you can follow along with the Tutorials and Challenge. On ARM nodes (GB200/GB300), you can run local MolMIM with `--molmim local-arm` (a pure-PyTorch MolMIM NIM that exposes `/hidden` and `/decode`, enabling CMA-ES guided optimization) or use hosted MolMIM for generation only; the wrapper tries local Boltz-2 and falls back to hosted Boltz-2 when local prediction requests fail.
 
 ### 📚 Tutorials
 The [`tutorials/`](tutorials/) folder contains everything you need to get started and background on the models and techniques used in the Challenge:
@@ -76,19 +76,28 @@ jupyter-lab Start_Here.ipynb
 the NIM services, waits for health checks, and writes `.openhackathon-nims.env`.
 The service wrapper is architecture-aware: x86_64/amd64 tries local MolMIM plus
 local Boltz-2 and falls back to hosted endpoints when local services do not pass
-their checks; aarch64/arm64 uses hosted MolMIM, then tries local Boltz-2 with a
-hosted Boltz-2 fallback. Boltz-2 readiness includes a small prediction smoke
-test, because `/v1/health/ready` alone can be true before worker GPUs are usable.
+their checks; aarch64/arm64 defaults to hosted MolMIM and tries local Boltz-2
+with a hosted Boltz-2 fallback. On aarch64 you can instead run local MolMIM with
+`--molmim local-arm` (a pure-PyTorch MolMIM NIM that exposes `/hidden` and
+`/decode`), which re-enables CMA-ES guided optimization on GB200/GB300. Boltz-2
+readiness includes a small prediction smoke test, because `/v1/health/ready`
+alone can be true before worker GPUs are usable.
 
-For Docker-only GB200/GB300 ARM nodes, the same command works after selecting
-the Docker runtime:
+For Docker-only GB200/GB300 ARM nodes, select the Docker runtime. To run MolMIM
+locally on ARM (enabling `/hidden`, `/decode`, and CMA-ES guided optimization),
+add `--molmim local-arm`:
 
 ```bash
 export NGC_API_KEY=<PASTE_API_KEY_HERE>
 export OPENHACKATHON_CONTAINER_RUNTIME=docker
-scripts/bootstrap_bootcamp.sh --boltz2 1
+scripts/bootstrap_bootcamp.sh --molmim local-arm --boltz2 1
 source .openhackathon-nims.env
 ```
+
+The first `local-arm` launch builds a small pure-PyTorch MolMIM image from
+`molmim_arm/` and downloads the `molmim_70m_24_3` weights, so allow extra time
+before the endpoint reports ready. Omit `--molmim local-arm` to use hosted MolMIM
+(generation only). See [`deployment.md`](deployment.md) for details.
 
 The service wrapper writes the actual MolMIM and Boltz-2 URLs to
 `.openhackathon-nims.env`. Source that file in every shell before running
