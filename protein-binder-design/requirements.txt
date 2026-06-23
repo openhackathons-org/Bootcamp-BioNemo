@@ -1,0 +1,9 @@
+# Optional protein-binder-design stream dependencies (in addition to the
+# repo-root deployment-requirements.txt). Install with:
+#   pip install -r protein-binder-design/requirements.txt
+numpy
+requests
+pandas
+matplotlib
+ipymolstar>=0.0.8
+py3Dmol

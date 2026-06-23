@@ -1,0 +1,5 @@
+runs/
+executed/
+__pycache__/
+*.pyc
+.sif/

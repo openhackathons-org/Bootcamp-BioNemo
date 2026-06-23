@@ -38,6 +38,15 @@ The [`mini-hands-on/`](mini-hands-on/) folder contains a compact hands-on track 
 - **04_Optional_MolMIM_CMA-ES_Controlled_Generation.ipynb**: Focused MolMIM CMA-ES optimization exercise
 - **05_Optional_Boltz2_validation.ipynb**: Boltz-2 validation on known actives and decoys
 
+### 🧬 Optional Stream: Protein Binder Design
+The [`protein-binder-design/`](protein-binder-design/) folder is a self-contained, optional stream
+(independent of the MolMIM / CDK track) that designs a de novo **protein binder** against the
+SARS-CoV-2 spike RBD by composing three NVIDIA BioNeMo NIMs — **RFdiffusion → ProteinMPNN →
+Boltz-2** (backbones → sequences → co-fold + score). It includes target biology and therapeutic
+relevance, NIM intros, the workflow architecture, interactive **Mol\*** views of the designed
+binder–target complexes, and assessment plots, and runs in under an hour on a GB200. See
+[`protein-binder-design/README.md`](protein-binder-design/README.md).
+
 
 ## Bootcamp Objectives
 
